@@ -5,6 +5,7 @@
   "dependencies": [
     "sse2neon",
     "args",
+    "yaml-cpp",
     {
       "name": "libtorch",
       "features": ["fftw3","opencv","xnnpack","zstd"]

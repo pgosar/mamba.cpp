@@ -1,0 +1,29 @@
+mamba_2.4b:
+ max_prompt_length: 100
+ max_response_length: 100
+ temperature: 1.0
+ top_k: 1
+ top_p: 1.0
+ min_p: 0
+ repetition_penalty: 1
+ batch_size: 1
+
+mamba_1.4b:
+ max_prompt_length: 100
+ max_response_length: 100
+ temperature: 1.0
+ top_k: 1
+ top_p: 1.0
+ min_p: 0
+ repetition_penalty: 1
+ batch_size: 1
+
+mamba_130m:
+ max_prompt_length: 100
+ max_response_length: 100
+ temperature: 1.0
+ top_k: 1
+ top_p: 1.0
+ min_p: 0.0
+ repetition_penalty: 1
+ batch_size: 1

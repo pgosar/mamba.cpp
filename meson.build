@@ -8,5 +8,6 @@ run_command(vcpkg, 'install', '--x-wait-for-lock',
 
 incdir = include_directories('vcpkg_installed/x64-linux/include')
 sources = files(['src/main.cpp', 'src/util.cpp'])
+yaml_dep = dependency('yaml-cpp', required: true)
 
-executable('mamba', sources, include_directories: incdir)
+executable('mamba', sources, include_directories: incdir, dependencies: [yaml_dep])

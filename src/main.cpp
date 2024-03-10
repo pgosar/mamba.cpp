@@ -1,7 +1,8 @@
-#include "util.h"
+#include "util.hpp"
 
 int main(int argc, char *argv[]) {
   Opts opts = parse_args(argc, argv);
-  std::cout << "Verbosity: " << opts.verbose << std::endl;
+  const std::string CONFIG_FILE = "../mamba_configuration.yaml";
+  Inference inf = parse_config(CONFIG_FILE, opts.configuration);
   return 0;
 }
