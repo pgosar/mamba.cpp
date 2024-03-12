@@ -6,6 +6,7 @@
     "sse2neon",
     "args",
     "yaml-cpp",
+    "sse2neon",
     {
       "name": "libtorch",
       "features": ["fftw3","opencv","xnnpack","zstd"]
