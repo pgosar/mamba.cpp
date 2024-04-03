@@ -38,7 +38,7 @@ Opts parse_args(int argc, char *argv[]) {
   return opts;
 }
 
-Inference parse_config(const std::string config_file,
+Config parse_config(const std::string config_file,
                        const std::string config_name) {
   YAML::Node config = YAML::LoadFile(config_file);
   if (!config[config_name]) {
@@ -47,7 +47,7 @@ Inference parse_config(const std::string config_file,
     exit(1);
   }
 
-  Inference inf;
+  Config inf;
   inf.max_prompt_length = config[config_name]["max_prompt_length"].as<int>();
   inf.max_response_length =
       config[config_name]["max_response_length"].as<int>();
