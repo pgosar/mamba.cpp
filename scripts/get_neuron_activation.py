@@ -1,6 +1,6 @@
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
-
+import argparse
 import torch
+from transformers import MambaForCausalLM, AutoTokenizer
 
 # Define model dimensions
 model_dimensions = {
@@ -14,32 +14,37 @@ model_dimensions = {
 # Activation tracking
 activations = {}
 
-def get_activation(name):
+def get_activation(name, model_size):
     def hook(model, input, output):
         try:
-            if output.shape[-1] == model_dimensions[MODEL_SIZE]["dim"]:
+            if output.shape[-1] == model_dimensions[model_size]["dim"]:
                 activations[name] = output.detach()
                 print(f"Layer {name} has output of shape {output.shape}")
         except AttributeError as _:
             pass
     return hook
 
-MODEL_SIZE = "130M"
+def main(model_size):
+    tokenizer = AutoTokenizer.from_pretrained(f"state-spaces/mamba-{model_size}-hf")
+    model = MambaForCausalLM.from_pretrained(f"state-spaces/mamba-{model_size}-hf")
 
-tokenizer = AutoTokenizer.from_pretrained(f"state-spaces/mamba-{MODEL_SIZE}-hf")
-model = MambaForCausalLM.from_pretrained(f"state-spaces/mamba-{MODEL_SIZE}-hf")
+    hooks = []
+    for name, layer in model.named_modules():
+        if isinstance(layer, torch.nn.Module) and len(list(layer.parameters())) > 0:
+            hook_handle = layer.register_forward_hook(get_activation(name, model_size))
+            hooks.append(hook_handle)
 
-hooks = []
-for name, layer in model.named_modules():
-    if isinstance(layer, torch.nn.Module) and len(list(layer.parameters())) > 0:
-        hook_handle = layer.register_forward_hook(get_activation(name))
-        hooks.append(hook_handle)
+    # Generate text
+    input_ids = tokenizer("Tell me a joke", return_tensors="pt")["input_ids"]
+    out = model.generate(input_ids, max_new_tokens=50)
+    print(tokenizer.batch_decode(out))
 
-# Generate text
-input_ids = tokenizer("Tell me a joke", return_tensors="pt")["input_ids"]
-out = model.generate(input_ids, max_new_tokens=50)
-print(tokenizer.batch_decode(out))
+    # Clean up the hooks
+    for hook in hooks:
+        hook.remove()
 
-# Clean up the hooks
-for hook in hooks:
-    hook.remove()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the model with specified size.")
+    parser.add_argument("-m", "--model-size", type=str, choices=model_dimensions.keys(), help="Size of the model")
+    args = parser.parse_args()
+    main(args.model_size)
