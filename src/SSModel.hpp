@@ -15,6 +15,11 @@
  *  generate
 */
 
+//BIG TODO ints->longs probably needed for larger models
+
+#ifdef CUDA_SSM
+typedef torch::Tensor (*callable)(torch::Tensor&, torch::Tensor&, int);
+
 struct DecodingCGCache {
   int max_batch_size;
   int max_seqlen;
@@ -30,14 +35,25 @@ struct DecodingCGCache {
     dtype(torch::kFloat32),
     params(0, 0)
   {}
+
+  torch::Tensor run(torch::Tensor& input_ids, torch::Tensor& position_ids, int seqlen) {
+    int batch_size = input_ids.sizes()[0];
+    int decoding_seqlen = input_ids.sizes()[0];
+
+    return callables[batch_size, decoding_seqlen](input_ids, position_ids, seqlen);
+  }
 };
+#endif
 
 class SSModel : torch::nn::Module {
 private:
   //config data
   //config
-  const torch::DeviceType device = torch::kCPU; 
+  const torch::DeviceType device = torch::kCPU;
+   
+#ifdef CUDA_SSM
   DecodingCGCache _decoding_cache;
+#endif
 
 public: 
   SSModel();
@@ -45,10 +61,12 @@ public:
 
   void generate(torch::Tensor&, Config);
 
+#ifdef CUDA_SSM
   void allocate_inference_cache(int, int, torch::Dtype);
   void update_graph_cache(int, int, int, torch::Dtype);
 
-  // torch::Tensor forward(Graph tree);
+  torch::Tensor forward(Graph tree);
+#endif
 };
 
 void modify_logits_for_min_p_filtering(torch::Tensor&, float);

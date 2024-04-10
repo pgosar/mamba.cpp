@@ -13,7 +13,7 @@ run_command(vcpkg, 'install', '--x-wait-for-lock',
 
 # TODO detect triplet and include @ x64-linux or arm64-osx
 
-incdir = include_directories('vcpkg_installed/arm64-osx/include', 'vcpkg_installed/arm64-osx/include/torch/csrc/api/include')
+incdir = include_directories('vcpkg_installed/x64-linux/include', 'vcpkg_installed/x64-linux/include/torch/csrc/api/include')
 sources = files(['src/main.cpp', 'src/util.cpp', 'src/SSModel.cpp', 'src/Tokenizer.cpp'])
 yaml_dep = dependency('yaml-cpp', required: true)
 torch_dep = dependency('libtorch', required: true)

@@ -24,7 +24,7 @@ struct Config {
   int top_k;
   float top_p;
   float min_p;
-  int repetition_penalty;
+  float repetition_penalty;
   int batch_size;
 };
 

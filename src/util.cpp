@@ -55,7 +55,7 @@ Config parse_config(const std::string config_file,
   inf.top_k = config[config_name]["top_k"].as<int>();
   inf.top_p = config[config_name]["top_p"].as<float>();
   inf.min_p = config[config_name]["min_p"].as<float>();
-  inf.repetition_penalty = config[config_name]["repetition_penalty"].as<int>();
+  inf.repetition_penalty = config[config_name]["repetition_penalty"].as<float>();
   inf.batch_size = config[config_name]["batch_size"].as<int>();
 
   return inf;

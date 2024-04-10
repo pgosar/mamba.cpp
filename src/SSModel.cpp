@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits>
+#include <vector>
 #include <algorithm>
 
 SSModel::SSModel() {}
@@ -43,6 +44,32 @@ SSModel SSModel::from_pretrained(const std::string& filepath) {
   return SSModel();
 }
 
+torch::Tensor get_logits(torch::Tensor& input_ids, InferenceParams& inference_params) {
+  bool decoding = inference_params.seqlen_offset > 0;
+  torch::Tensor position_ids; //todo None?
+  torch::Tensor logits;
+  if(decoding) {
+    // position_ids = torch::full()
+  } else {
+    //TODO went to sleepy sleep here
+  }
+
+  return logits;
+}
+
+torch::Tensor sample_tokens(torch::Tensor& logits, Config& cfg) {
+  torch::Tensor token = sample(logits, cfg.top_k, cfg.top_p, cfg.min_p, cfg.temperature);
+  return token.unsqueeze(1);
+}
+
+bool should_stop(torch::Tensor current_token, InferenceParams& inference_params, int max_length) {
+  if(inference_params.seqlen_offset == 0) return false;
+
+  //TODO eos token ID?
+
+  return inference_params.seqlen_offset >= max_length - 1;
+}
+
 void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //Decode logic
   //Top-k -> top-p
@@ -52,8 +79,34 @@ void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //Assume CG
 
   //TODO
-  //decoding cache
+  //decoding cache - only for CUDA
   //inference params
+  InferenceParams inference_params(cfg.max_response_length, batch_size);
+
+  //todo scores
+  std::vector<torch::Tensor> sequences, scores;
+  sequences.push_back(input_ids);
+
+  torch::Tensor sequences_cat = input_ids;
+
+  while(!should_stop(sequences.back(), inference_params, cfg.max_response_length)) {
+    scores.push_back(get_logits(sequences.back(), inference_params));
+    inference_params.seqlen_offset += sequences.back().sizes()[1];
+
+    torch::Tensor sampled_tokens;
+    if(cfg.repetition_penalty == 1.0) {
+      sampled_tokens = sample_tokens(scores.back(), cfg);
+    } else {
+      torch::Tensor logits = modify_logit_for_repetition_penalty(
+          scores.back().clone(), sequences_cat, cfg.repetition_penalty
+      );
+      sampled_tokens = sample_tokens(logits, cfg);
+      // sequences_cat = torch::cat([sequences_cat, sampled_tokens], 1);
+    }
+    sequences.push_back(sampled_tokens);
+
+    //todo return outputcls with sequences and scores
+  }
 
   //External functions:
   //get logits
@@ -66,6 +119,7 @@ void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //but NOT CUDA
 }
 
+#ifdef CUDA_SSM
 void SSModel::allocate_inference_cache(
   int batch_size, 
   int max_seq_len, 
@@ -89,6 +143,7 @@ void SSModel::update_graph_cache(
       // _decoding_cache.params = 
     }
 }
+#endif
 
 void modify_logits_for_min_p_filtering(torch::Tensor& logits, float min_p) {
   if(min_p <= 0.0 || min_p >= 1.0) return;
@@ -119,7 +174,7 @@ void modify_logits_for_top_k_filtering(torch::Tensor& logits, int top_k) {
 }
 
 torch::Tensor& modify_logit_for_repetition_penalty(
-  torch::Tensor& logits, torch::Tensor& prev_output_tokens, float repetition_penalty) {
+  torch::Tensor logits, torch::Tensor& prev_output_tokens, float repetition_penalty) {
     if (repetition_penalty == 1.0) return logits;
     torch::Tensor score = torch::gather(logits, 1, prev_output_tokens);
     // if score < 0 then repetition penalty has to be multiplied to reduce the previous token probability
