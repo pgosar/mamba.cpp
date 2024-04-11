@@ -44,25 +44,33 @@ SSModel SSModel::from_pretrained(const std::string& filepath) {
   return SSModel();
 }
 
-torch::Tensor get_logits(torch::Tensor& input_ids, InferenceParams& inference_params) {
+torch::Tensor SSModel::forward(torch::Tensor& input_ids, torch::Tensor& position_ids, InferenceParams& inference_params, int num_last_tokens=0) {
+  torch::Tensor hidden_states;
+
+  //TODO implement
+
+  return hidden_states;
+}
+
+torch::Tensor SSModel::get_logits(torch::Tensor& input_ids, InferenceParams& inference_params, long batch_size) {
   bool decoding = inference_params.seqlen_offset > 0;
   torch::Tensor position_ids; //todo None?
-  torch::Tensor logits;
   if(decoding) {
-    // position_ids = torch::full()
-  } else {
-    //TODO went to sleepy sleep here
-  }
+    auto options = torch::TensorOptions().dtype(torch::kLong).device(input_ids.device()); //TODO use global options
+    position_ids = torch::full({batch_size, 1}, inference_params.seqlen_offset, options); //TODO looks like this is unused
+  } 
+
+  torch::Tensor logits = forward(input_ids, position_ids, inference_params, 1);
 
   return logits;
 }
 
-torch::Tensor sample_tokens(torch::Tensor& logits, Config& cfg) {
+torch::Tensor SSModel::sample_tokens(torch::Tensor& logits, Config& cfg) {
   torch::Tensor token = sample(logits, cfg.top_k, cfg.top_p, cfg.min_p, cfg.temperature);
   return token.unsqueeze(1);
 }
 
-bool should_stop(torch::Tensor current_token, InferenceParams& inference_params, int max_length) {
+bool SSModel::should_stop(torch::Tensor current_token, InferenceParams& inference_params, int max_length) {
   if(inference_params.seqlen_offset == 0) return false;
 
   //TODO eos token ID?
@@ -73,8 +81,8 @@ bool should_stop(torch::Tensor current_token, InferenceParams& inference_params,
 void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //Decode logic
   //Top-k -> top-p
-  unsigned long batch_size = input_ids.sizes()[0];
-  unsigned long seq_len_og = input_ids.sizes()[1];
+  long batch_size = input_ids.sizes()[0];
+  long seq_len_og = input_ids.sizes()[1];
 
   //Assume CG
 
@@ -83,14 +91,13 @@ void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //inference params
   InferenceParams inference_params(cfg.max_response_length, batch_size);
 
-  //todo scores
   std::vector<torch::Tensor> sequences, scores;
   sequences.push_back(input_ids);
 
   torch::Tensor sequences_cat = input_ids;
 
   while(!should_stop(sequences.back(), inference_params, cfg.max_response_length)) {
-    scores.push_back(get_logits(sequences.back(), inference_params));
+    scores.push_back(get_logits(sequences.back(), inference_params, batch_size));
     inference_params.seqlen_offset += sequences.back().sizes()[1];
 
     torch::Tensor sampled_tokens;
@@ -101,22 +108,14 @@ void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
           scores.back().clone(), sequences_cat, cfg.repetition_penalty
       );
       sampled_tokens = sample_tokens(logits, cfg);
-      // sequences_cat = torch::cat([sequences_cat, sampled_tokens], 1);
+      sequences_cat = torch::cat({sequences_cat, sampled_tokens}, 1);
     }
     sequences.push_back(sampled_tokens);
-
-    //todo return outputcls with sequences and scores
   }
 
-  //External functions:
-  //get logits
-  //sample tokens
-  //should stop
+  //todo return outputcls with sequences and scores
 
   //will want timing, but not CUDA
-  
-  //main loop
-  //but NOT CUDA
 }
 
 #ifdef CUDA_SSM
@@ -183,7 +182,7 @@ torch::Tensor& modify_logit_for_repetition_penalty(
     return logits;
 }
 
-torch::Tensor sample(
+torch::Tensor SSModel::sample(
   torch::Tensor& logits, int64_t top_k=1, float top_p=0.0, float min_p=0.0, float temperature=1.0) {
   /* Sample from top-k logits.
   Arguments:

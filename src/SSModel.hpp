@@ -55,11 +55,17 @@ private:
   DecodingCGCache _decoding_cache;
 #endif
 
+  torch::Tensor get_logits(torch::Tensor&, InferenceParams&, long);
+  torch::Tensor sample_tokens(torch::Tensor&, Config&);
+  bool should_stop(torch::Tensor, InferenceParams&, int);
+
 public: 
   SSModel();
   static SSModel from_pretrained(const std::string&);
 
   void generate(torch::Tensor&, Config);
+  torch::Tensor forward(torch::Tensor&, torch::Tensor&, InferenceParams&, int);
+  torch::Tensor sample(torch::Tensor&, int64_t, float, float, float);
 
 #ifdef CUDA_SSM
   void allocate_inference_cache(int, int, torch::Dtype);
@@ -73,6 +79,6 @@ void modify_logits_for_min_p_filtering(torch::Tensor&, float);
 void modify_logits_for_top_p_filtering(torch::Tensor&, float);
 void modify_logits_for_top_k_filtering(torch::Tensor&, int);
 
-torch::Tensor& modify_logit_for_repetition_penalty(torch::Tensor&, torch::Tensor&, float);
+torch::Tensor& modify_logit_for_repetition_penalty(torch::Tensor, torch::Tensor&, float);
 
 #endif
