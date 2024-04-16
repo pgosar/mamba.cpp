@@ -57,6 +57,18 @@ public:
   torch::Device, torch::Dtype);
 };
 
+struct Block : torch::nn::Module {
+private:
+  bool _residual_in_fp32;
+  bool _fused_add_norm;
+  torch::nn::Embedding _embedding;
+  torch::nn::ModuleList _layers;
+
+public:
+  Block();
+  std::tuple(torch::Tensor, std::optional<torch::Tensor>) forward();
+};
+
 class SSModel : torch::nn::Module {
 private:
   //config data

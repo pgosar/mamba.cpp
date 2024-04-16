@@ -65,8 +65,8 @@ torch::Tensor SSModel::get_logits(torch::Tensor& input_ids, InferenceParams& inf
   return logits;
 }
 
-torch::Tensor SSModel::sample_tokens(torch::Tensor& logits, Config& cfg) {
-  torch::Tensor token = sample(logits, cfg.top_k, cfg.top_p, cfg.min_p, cfg.temperature);
+torch::Tensor SSModel::sample_tokens(torch::Tensor& logits, Config& inference_params) {
+  torch::Tensor token = sample(logits, inference_params.top_k, inference_params.top_p, inference_params.min_p, inference_params.temperature);
   return token.unsqueeze(1);
 }
 
@@ -78,7 +78,7 @@ bool SSModel::should_stop(torch::Tensor current_token, InferenceParams& inferenc
   return inference_params.seqlen_offset >= max_length - 1;
 }
 
-void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
+void SSModel::generate(torch::Tensor& input_ids, Config inference_params) {
   //Decode logic
   //Top-k -> top-p
   long batch_size = input_ids.sizes()[0];
@@ -89,25 +89,25 @@ void SSModel::generate(torch::Tensor& input_ids, Config cfg) {
   //TODO
   //decoding cache - only for CUDA
   //inference params
-  InferenceParams inference_params(cfg.max_response_length, batch_size);
+  InferenceParams inference_params(inference_params.max_response_length, batch_size);
 
   std::vector<torch::Tensor> sequences, scores;
   sequences.push_back(input_ids);
 
   torch::Tensor sequences_cat = input_ids;
 
-  while(!should_stop(sequences.back(), inference_params, cfg.max_response_length)) {
+  while(!should_stop(sequences.back(), inference_params, inference_params.max_response_length)) {
     scores.push_back(get_logits(sequences.back(), inference_params, batch_size));
     inference_params.seqlen_offset += sequences.back().sizes()[1];
 
     torch::Tensor sampled_tokens;
-    if(cfg.repetition_penalty == 1.0) {
-      sampled_tokens = sample_tokens(scores.back(), cfg);
+    if(inference_params.repetition_penalty == 1.0) {
+      sampled_tokens = sample_tokens(scores.back(), inference_params);
     } else {
       torch::Tensor logits = modify_logit_for_repetition_penalty(
-          scores.back().clone(), sequences_cat, cfg.repetition_penalty
+          scores.back().clone(), sequences_cat, inference_params.repetition_penalty
       );
-      sampled_tokens = sample_tokens(logits, cfg);
+      sampled_tokens = sample_tokens(logits, inference_params);
       sequences_cat = torch::cat({sequences_cat, sampled_tokens}, 1);
     }
     sequences.push_back(sampled_tokens);
@@ -234,9 +234,22 @@ MixerModel::MixerModel(int d_model, int n_layer, int vocab_size,
   _embedding(vocab_size, d_model, device=device, dtype=dtype);
 
   //TODO layers
+  for(int i = 0; i < n_layer; i++) {
+    
+  }
+  
   _layers();
 
   //TODO normalization
 
   //TODO apply partial
+}
+
+Block::Block() {
+  
+}
+
+std::tuple(torch::Tensor, std::optional<torch::Tensor>) forward(torch::Tensor, std::optional<torch::Tensor>) {
+  //TODO
+  return std::make_tuple(torch::Tensor(), std::nullopt);
 }
