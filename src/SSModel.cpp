@@ -225,3 +225,18 @@ torch::Tensor SSModel::sample(
     }
   }
 }
+
+MixerModel::MixerModel(int d_model, int n_layer, int vocab_size, 
+  Config& ssm_cfg, float norm_epsilon, bool rms_norm, bool fused_add_norm,
+  bool residual_in_fp32, torch::Device device, torch::Dtype dtype) : 
+    _residual_in_fp32(residual_in_fp32),
+    _fused_add_norm(fused_add_norm) {
+  _embedding(vocab_size, d_model, device=device, dtype=dtype);
+
+  //TODO layers
+  _layers();
+
+  //TODO normalization
+
+  //TODO apply partial
+}

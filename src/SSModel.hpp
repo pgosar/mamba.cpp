@@ -45,6 +45,18 @@ struct DecodingCGCache {
 };
 #endif
 
+class MixerModel : torch::nn::Module {
+private:
+  bool _residual_in_fp32;
+  bool _fused_add_norm;
+  torch::nn::Embedding _embedding;
+  torch::nn::ModuleList _layers;
+
+public:
+  MixerModel(int, int, int, Config&, float, bool, bool, bool, 
+  torch::Device, torch::Dtype);
+};
+
 class SSModel : torch::nn::Module {
 private:
   //config data
