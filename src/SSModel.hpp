@@ -5,7 +5,7 @@
 #include <vector>
 #include <torch/torch.h>
 #include <ATen/Tensor.h>
-
+#include "Norm.hpp"
 #include "util.hpp"
 
 /**
@@ -49,8 +49,8 @@ class MixerModel : torch::nn::Module {
 private:
   bool _residual_in_fp32;
   bool _fused_add_norm;
-  torch::nn::Embedding _embedding;
-  torch::nn::ModuleList _layers;
+  //torch::nn::Embedding _embedding;
+  //torch::nn::ModuleList _layers;
 
 public:
   MixerModel(int, int, int, Config&, float, bool, bool, bool, 
@@ -61,12 +61,14 @@ struct Block : torch::nn::Module {
 private:
   bool _residual_in_fp32;
   bool _fused_add_norm;
-  torch::nn::Embedding _embedding;
-  torch::nn::ModuleList _layers;
+  LayerNormFn _layer_norm;
+  MixerNormFn _mixer_norm;
+  //torch::nn::Embedding _embedding;
+  //torch::nn::ModuleList _layers;
 
 public:
   Block();
-  std::tuple(torch::Tensor, std::optional<torch::Tensor>) forward();
+  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward();
 };
 
 class SSModel : torch::nn::Module {
@@ -74,7 +76,7 @@ private:
   //config data
   //config
   const torch::DeviceType device = torch::kCPU;
-   
+
 #ifdef CUDA_SSM
   DecodingCGCache _decoding_cache;
 #endif
