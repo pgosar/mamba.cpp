@@ -62,13 +62,26 @@ private:
   bool _residual_in_fp32;
   bool _fused_add_norm;
   LayerNormFn _layer_norm;
-  MixerNormFn _mixer_norm;
+  //MixerNormFn _mixer_norm;
   //torch::nn::Embedding _embedding;
   //torch::nn::ModuleList _layers;
 
 public:
   Block();
-  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward();
+  //std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward();
+};
+
+//TODO we'll need to credit if we keep this in when going public
+struct SSMConfig {
+  int n_layers;   // number of layers
+  int vocab_size; // vocabulary size
+  int dim;        // embedding dimension
+  int d_inner;
+  int dt_rank;
+  int d_state;
+  int d_conv;
+  int shared_classifier;
+  int rounded_vocab_size;
 };
 
 class SSModel : torch::nn::Module {
@@ -76,6 +89,10 @@ private:
   //config data
   //config
   const torch::DeviceType device = torch::kCPU;
+  SSMConfig cfg;
+
+  float* data;  //so we may unmap in destructor
+  size_t filesize;
 
 #ifdef CUDA_SSM
   DecodingCGCache _decoding_cache;
@@ -84,9 +101,12 @@ private:
   torch::Tensor get_logits(torch::Tensor&, InferenceParams&, long);
   torch::Tensor sample_tokens(torch::Tensor&, Config&);
   bool should_stop(torch::Tensor, InferenceParams&, int);
+    
+  torch::Tensor forward_layer(torch::Tensor&, torch::Tensor&, InferenceParams&, int);
 
 public: 
   SSModel();
+  ~SSModel();
   static SSModel from_pretrained(const std::string&);
 
   void generate(torch::Tensor&, Config);

@@ -5,7 +5,16 @@
 #include <vector>
 #include <algorithm>
 
+#include <sys/mman.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 SSModel::SSModel() {}
+
+SSModel::~SSModel() {
+  if(data != MAP_FAILED)
+    munmap(data, filesize);
+}
 
 /**
  * Follow along modeling_utils.py:4029, reading in model step-by-step
@@ -18,35 +27,85 @@ SSModel::SSModel() {}
  * We can generate quantized model from python, that's fine and dandy
 */
 
-SSModel SSModel::from_pretrained(const std::string& filepath) {
-  FILE* fp = fopen(filepath.c_str(),"rb");
+SSModel from_safetensors(FILE* fp) {
+  size_t N;
+  fread(&N, sizeof(size_t), 1, fp);
 
-  if(fp) {
-    size_t N;
-    fread(&N, sizeof(size_t), 1, fp);
+  size_t size = sizeof(char) * (N+1);
+  char* header = (char*) malloc(size);
+  fread(header, sizeof(char), size, fp);
+  header[N] = 0;
 
-    size_t size = sizeof(char) * (N+1);
-    char* header = (char*) malloc(size);
-    fread(header, sizeof(char), size, fp);
-    header[N] = 0;
+  printf("%ld\n", N);
 
-    printf("%ld\n", N);
-
-    free(header);
-  } else {
-    //File not found
-    printf("Model file not found\n");
-  }
+  free(header);
 
   fclose(fp);
 
+  //todo replace
   return SSModel();
 }
+
+SSModel SSModel::from_pretrained(const std::string& filepath) {
+  FILE* fp = fopen(filepath.c_str(),"rb");
+  if(!fp) {
+    printf("Model file not found\n");
+    exit(EXIT_FAILURE);
+  }
+
+  unsigned int magic;
+  //todo there should be a better way to do this long-term
+  if (fread(&magic, sizeof(int), 1, fp) != 1) { exit(EXIT_FAILURE); }
+  if (magic != 0x4d616d62) {
+    fseek(fp, -sizeof(int), SEEK_CUR);
+    return from_safetensors(fp);
+  }
+
+  int version;
+  if (fread(&version, sizeof(int), 1, fp) != 1) { exit(EXIT_FAILURE); }
+
+  SSModel model;
+  
+  if (fread(&model.cfg, sizeof(SSMConfig), 1, fp) != 1) { exit(EXIT_FAILURE); }
+  if (model.cfg.vocab_size % 8 != 0) {
+    model.cfg.rounded_vocab_size = model.cfg.vocab_size + (8 - (model.cfg.vocab_size % 8));
+  } else {
+    model.cfg.rounded_vocab_size = model.cfg.vocab_size;
+  }
+
+  fseek(fp, 0, SEEK_END); // move file pointer to end of file
+  model.filesize = ftell(fp); // get the file size, in bytes
+  fclose(fp);
+
+  int fd = open(filepath.c_str(), O_RDONLY); // open in read only mode
+  if (fd == -1) { fprintf(stderr, "open failed!\n"); exit(EXIT_FAILURE); }
+
+  model.data = (float*) mmap(NULL, model.filesize, PROT_READ, MAP_PRIVATE, fd, 0);
+
+  if (model.data == MAP_FAILED) { fprintf(stderr, "mmap failed!\n"); exit(EXIT_FAILURE); }
+  //once mmap is complete, we may close the file
+  close(fd);
+
+  float* weights_ptr = model.data + (256 / 4);
+
+  //todo weights
+
+  return model;
+}
+
+torch::Tensor forward_layer()
 
 torch::Tensor SSModel::forward(torch::Tensor& input_ids, torch::Tensor& position_ids, InferenceParams& inference_params, int num_last_tokens=0) {
   torch::Tensor hidden_states;
 
   //TODO implement
+
+  //call forward on each layer (todo parallelize??)
+  for(int l = 0; l < cfg.n_layers; l++) {
+    // rmsnorm(hidden_state, input, w->norm + l * dim, dim);
+
+    // forward_layer();
+  }
 
   return hidden_states;
 }
@@ -171,6 +230,7 @@ void modify_logits_for_top_k_filtering(torch::Tensor& logits, int top_k) {
     logits.masked_fill_(indices_to_remove, -std::numeric_limits<float>::infinity());
 }
 
+//TODO let's try and improve this
 torch::Tensor& modify_logit_for_repetition_penalty(
   torch::Tensor logits, torch::Tensor& prev_output_tokens, float repetition_penalty) {
     if (repetition_penalty == 1.0) return logits;
@@ -248,16 +308,16 @@ Block::Block() {
   
 }
 
-static std::tuple<torch::Tensor, std::optional<torch::Tensor>> Block::forward(torch::Tensor hidden_states, std::optional<torch::Tensor> residual, Config& inference_params) {
-  if (!_fused_add_norm) {
-    residual = (residual == NULL ? hidden_states : residual + hidden_states);
-    hidden_states = _layer_norm(residual.to(_layer_norm.weight.dtype));
-    if (_residual_in_fp32) {
-      residual = residual.to(torch::kFloat32);
-    }
-  } else {
-    _layer_norm.fused_add_norm_fn(hidden_states, _layer_norm.weight, _layer_norm.bias, residual, true, _residual_in_fp32, _layer_norm.eps); 
-  }
-  hidden_states = _mixer_norm(hidden_states, inference_params)
-  return std::make_tuple(hidden_states, residual);
-}
+// static std::tuple<torch::Tensor, std::optional<torch::Tensor>> Block::forward(torch::Tensor hidden_states, std::optional<torch::Tensor> residual, Config& inference_params) {
+//   if (!_fused_add_norm) {
+//     residual = (residual == NULL ? hidden_states : residual + hidden_states);
+//     hidden_states = _layer_norm(residual.to(_layer_norm.weight.dtype));
+//     if (_residual_in_fp32) {
+//       residual = residual.to(torch::kFloat32);
+//     }
+//   } else {
+//     _layer_norm.fused_add_norm_fn(hidden_states, _layer_norm.weight, _layer_norm.bias, residual, true, _residual_in_fp32, _layer_norm.eps); 
+//   }
+//   hidden_states = _mixer_norm(hidden_states, inference_params)
+//   return std::make_tuple(hidden_states, residual);
+// }

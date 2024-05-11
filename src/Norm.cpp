@@ -54,6 +54,8 @@ torch::Tensor LayerNormFn::forward(
 
   auto options = torch::TensorOptions().dtype(torch::kFloat32).device(input.device());
 
+  //Translation of _layer_norm_fwd
+
   torch::Tensor mean;
   if(is_rms_norm) {
     mean = torch::empty({M,}, options);
@@ -68,6 +70,8 @@ torch::Tensor LayerNormFn::forward(
   for(int row = 0; row < M; row++) {
     int X = row * input.stride(0);
     int Y = row * output.stride(0);
+
+    
   }
 
   // ctx.save_for_backward(residual_out, weight, bias, mean, rstd);
