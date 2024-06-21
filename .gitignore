@@ -6,12 +6,8 @@ env/
 models/
 .vscode/
 vcpkg/
-triplets.txt
 .Rhistory
 .DS_Store
 .vcpkg-root
-blobber/
-testing/
 use_models.py
-tst.txt
-130m_trace.txt
+tokenizer.bin

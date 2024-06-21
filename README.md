@@ -1,13 +1,14 @@
 To run:
 
-1. Create build directory
-2. vcpkg install
-3. python3 download_models.py
-4. ./build.sh
+1. python3 scripts/tokenizer.py
+2. python3 scripts/export.py state-spaces/mamba-130m models/model.bin
+3. make fast
+4. ./build/mamba models/model.bin -n 20 -i "Customer Support should" -t 0.0
 
 Command line arguments will be used to control inference, for example, quantization level,
 debugging verbosity, input prompt.
 
+## TODO
 Model configuration will be done through model_config.yaml, for example, temperature (text
 diversity), generated text amount, batch size. There may be multiple selectable configurations,
 these are selected through the command line arguments.
@@ -84,3 +85,63 @@ https://leimao.github.io/article/Neural-Networks-Quantization/
 https://coffeebeforearch.github.io/2020/06/23/mmul.html
 
 https://justine.lol/matmul/
+
+# mamba.cpp
+
+<p align="center">
+  <img src="assets/mamba-c.png" width="300" height="300" alt="Mamba C">
+</p>
+
+<p align="right"><a href="https://github.com/kroggen/mamba.c/blob/learning/README-zh.md">中文</a> | <a href="https://github.com/kroggen/mamba.c/blob/learning/README-ja.md">日本語</a> | <a href="https://github.com/kroggen/mamba.c/blob/learning/README-ru.md">Русский</a></p>
+
+Inference of Mamba models in pure C
+
+Inspired by and using code from [llama2.c](https://github.com/karpathy/llama2.c)
+
+This implements only the recurrent mode of Mamba SSM
+
+You can compare it with the [related pytorch implementation](https://github.com/kroggen/mamba-cpu/tree/recurrent-only)
+
+No support for batches. The code is minimal for learning purposes.
+
+Even so, it is faster than pytorch on CPU!!!
+
+## Models
+
+You can use these models stored on [HuggingFace](https://huggingface.co/state-spaces):
+
+* `state-spaces/mamba-130m`
+* `state-spaces/mamba-370m`
+* `state-spaces/mamba-790m`
+* `state-spaces/mamba-1.4b`
+* `state-spaces/mamba-2.8b`
+* `state-spaces/mamba-2.8b-slimpj`
+
+You can specify the model name as an argument to the `export.py` script
+
+Note that the export script will download the model (if it's not already downloaded) to the hugingface cache directory.
+
+Optionally you can also specify the path to the model file, if you downloaded it manually. Example:
+
+```
+wget https://huggingface.co/state-spaces/mamba-130m/resolve/main/config.json?download=true -O config.json
+wget https://huggingface.co/state-spaces/mamba-130m/resolve/main/pytorch_model.bin?download=true -O pytorch_model.bin
+python3 export.py . model.bin
+```
+
+## Internal State
+
+As it is a recurrent model, it is possible to save the internal state and then return to that state later
+
+To get a copy of the internal state:
+
+```c
+  int state_size;
+  char* state = get_internal_state(mamba, &state_size);
+```
+
+To set the internal state:
+
+```c
+  set_internal_state(mamba, state, state_size);
+```
