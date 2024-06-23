@@ -37,7 +37,7 @@ def model_export(model, config, path, num_bits):
             "iiiiiiii",
             config.n_layer,
             config.vocab_size,
-            config.d_model,
+            config.hidden_size,
             d_inner,
             dt_rank,
             d_state,
@@ -76,11 +76,12 @@ def model_export(model, config, path, num_bits):
                 serialize_fp32(f, model[layer % n], num_bits)
 
         serialize_fp32(f, model["backbone.norm_f.weight"], num_bits)
+    print("model written to", path)
 
 
-def tokenizer_export(model):
+def tokenizer_export(model, path):
     print("exporting tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf")
+    tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-" + model + "-hf")
     # get all the tokens. For some reason tokenizer.vocab_size is returning 50254 (wrong)
     # vs 50277 (expected) :(
     # https://huggingface.co/state-spaces/mamba-2.8b-hf/blob/main/tokenizer.json
@@ -91,8 +92,7 @@ def tokenizer_export(model):
         tokens.append(b)
 
     max_token_length = max(len(t) for t in tokens)
-    tokenizer_bin = "../models/tokenizer.bin"
-    with open(tokenizer_bin, "wb") as f:
+    with open(path, "wb") as f:
         header = struct.pack("ii", len(tokens), max_token_length)
         f.write(header)
         for bytes in tokens:
@@ -101,19 +101,39 @@ def tokenizer_export(model):
 
 
 def main():
+    from os import makedirs
+
+    makedirs("models", exist_ok=True)
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "source",
+        "-m",
+        "--model",
         type=str,
         choices=["130m", "370m", "790m", "1.4b", "2.8b"],
         help="model name (allowed options: 130m, 370m, 790m, 1.4b, 2.8b)",
         default="130m",
     )
     parser.add_argument(
-        "destination",
+        "-md",
+        "--model_dir",
         type=str,
         help="output bin file",
         default="models/model.bin",
+    )
+    parser.add_argument(
+        "-t",
+        "--tokenizer",
+        type=str,
+        choices=["130m", "370m", "790m", "1.4b", "2.8b"],
+        help="tokenizer name (allowed options: 130m, 370m, 790m, 1.4b, 2.8b)",
+        default="130m",
+    )
+    parser.add_argument(
+        "-td",
+        "--tokenizer_dir",
+        type=str,
+        help="output tokenizer bin file",
+        default="models/tokenizer.bin",
     )
     parser.add_argument(
         "--bits",
@@ -123,12 +143,10 @@ def main():
     )
     args = parser.parse_args()
 
-    model = MambaForCausalLM.from_pretrained(
-        "state-spaces/mamba-" + args.source + "-hf"
-    )
-    config = MambaConfig.from_pretrained("state-spaces/mamba-" + args.source + "-hf")
-    model_export(model, config, args.destination, args.bits)
-    tokenizer_export(args.source)
+    model = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf")
+    config = MambaConfig.from_pretrained("state-spaces/mamba-" + args.model + "-hf")
+    model_export(model, config, args.model_dir, args.bits)
+    tokenizer_export(args.tokenizer, args.tokenizer_dir)
 
 
 if __name__ == "__main__":

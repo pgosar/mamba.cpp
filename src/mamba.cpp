@@ -27,7 +27,6 @@ typedef struct {
     int dt_rank;
     int d_state;
     int d_conv;
-    int shared_classifier;
     int rounded_vocab_size; // vocab_size rounded up to the nearest multiple of 8
 } Config;
 
@@ -173,7 +172,7 @@ void memory_map_weights(MambaWeights *w, Config* p, float* ptr) {
     w->norm = ptr;                   ptr += n_layers * p->dim;
     w->final_norm = ptr;             ptr += p->dim;
     // the classifier weights can be shared with the token embedding table
-    w->lm_head = p->shared_classifier ? w->token_embedding_table : ptr;
+    w->lm_head = w->token_embedding_table;
 }
 
 void load_model_file(char* model_path, Config* config, MambaWeights* weights,
@@ -182,12 +181,6 @@ void load_model_file(char* model_path, Config* config, MambaWeights* weights,
     if (!file) { fprintf(stderr, "Couldn't open file %s\n", model_path); exit(EXIT_FAILURE); }
     // read the magic number
     unsigned int magic;
-    if (fread(&magic, sizeof(int), 1, file) != 1) { exit(EXIT_FAILURE); }
-    if (magic != 0x4d616d62) { fprintf(stderr, "Invalid magic number: %x\n", magic); exit(EXIT_FAILURE); }
-    // read the version
-    int version;
-    if (fread(&version, sizeof(int), 1, file) != 1) { exit(EXIT_FAILURE); }
-    if (version != 1) { fprintf(stderr, "Invalid version: %d\n", version); exit(EXIT_FAILURE); }
     // read the config
     if (fread(config, sizeof(Config), 1, file) != 1) { exit(EXIT_FAILURE); }
     if (config->vocab_size % 8 != 0) {
@@ -530,14 +523,6 @@ void build_tokenizer(Tokenizer* t, char* tokenizer_path, int model_vocab_size) {
     // read in the file
     FILE *file = fopen(tokenizer_path, "rb");
     if (!file) { fprintf(stderr, "couldn't load %s\n", tokenizer_path); exit(EXIT_FAILURE); }
-    // read header magic
-    unsigned int magic;
-    if (fread(&magic, sizeof(int), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
-    if (magic != 0x4d62546b) { fprintf(stderr, "invalid magic number: %x\n", magic); exit(EXIT_FAILURE); }
-    // read version
-    int version;
-    if (fread(&version, sizeof(int), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
-    if (version != 1) { fprintf(stderr, "invalid version: %d\n", version); exit(EXIT_FAILURE); }
     // read vocab_size
     int vocab_size;
     if (fread(&vocab_size, sizeof(int), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
@@ -927,16 +912,16 @@ void generate(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler, char *prompt
             // otherwise sample the next token from the logits
 
             //modify for repetition penalty
-                //gather on logits using previous output tokens 
+                //gather on logits using previous output tokens
                 //mult/divide on gathered "score"
                 //scatter back into logits using above res
 
-            //1.0 does nothing. 
-            //values > 1 are pretty terrible and have high repetition 
-            //values < 1 help minimize repetition pretty well, but 
+            //1.0 does nothing.
+            //values > 1 are pretty terrible and have high repetition
+            //values < 1 help minimize repetition pretty well, but
             //  cause the quality of the response to suffer somewhat.
-            //  For example, for sufficiently "low" penalty, 
-            //  "I" gets penalized too harshly, so the llm 
+            //  For example, for sufficiently "low" penalty,
+            //  "I" gets penalized too harshly, so the llm
             //  uses non-penalized alternatives like 1 or i.
 
             //Ideal seems to be penalty values slightly less than 1.
@@ -1096,7 +1081,7 @@ int main(int argc, char *argv[]) {
 
     // default parameters
     char *model_path = NULL;    // e.g. out/model.bin
-    char *tokenizer_path = "tokenizer.bin";
+    char *tokenizer_path = "models/tokenizer.bin";
     float temperature = 1.0f;   // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;          // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 256;            // number of steps to run for
