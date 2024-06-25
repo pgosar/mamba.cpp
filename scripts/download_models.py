@@ -23,24 +23,28 @@ def quantize_tensor(tensor: Tensor, num_bits: int) -> Tensor:
     return x_quant.to(tensor.dtype)
 
 
-def serialize_fp32(file: BinaryIO, tensor: Tensor, num_bits: int) -> None:
-    if num_bits < 32:
-        tensor = quantize_tensor(tensor, num_bits)
-    d: Tensor = tensor.detach().cpu().view(-1).to(torch.dtype)
-    d, activations = preprocess(d)
-    b: bytes = struct.pack(f"{len(d)}f", *d.numpy(), *activations.numpy())
-    _ = file.write(b)
-
-
-def preprocess(tensor: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def preprocess(
+    tensor: Tensor, activations: Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     sparsity_threshold: float = 1e-3
     activation_threshold = 0.5
     # introduce sparsity
     tensor = torch.where(
         tensor.abs() < sparsity_threshold, torch.zeros_like(tensor), tensor
     )
-    activations: Tensor = (tensor.abs() > activation_threshold).to(torch.bool)
-    return tensor, activations
+    is_activated: Tensor = (activations.abs() > activation_threshold).to(torch.bool)
+    return tensor, is_activated
+
+
+def serialize_fp32(
+    file: BinaryIO, tensor: Tensor, is_activated: Tensor, num_bits: int
+) -> None:
+    if num_bits < 32:
+        tensor = quantize_tensor(tensor, num_bits)
+    d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
+    d, is_activated = preprocess(d, is_activated)
+    b: bytes = struct.pack(f"{len(d)}f", *d.numpy(), *is_activated.numpy())
+    _ = file.write(b)
 
 
 def model_export(
@@ -74,7 +78,27 @@ def model_export(
                 model_dict.pop(f"backbone.layers.{n}.mixer.A_log")
             )
 
-        serialize_fp32(f, model_dict["backbone.embeddings.weight"], num_bits)
+        # input from neural network, add to activations dictionary for each layer
+        activations = {
+            "backbone.embeddings.weight": torch.empty(0),
+            "backbone.layers.%d.mixer.in_proj.weight": torch.empty(0),
+            "backbone.layers.%d.mixer.conv1d.weight": torch.empty(0),
+            "backbone.layers.%d.mixer.conv1d.bias": torch.empty(0),
+            "backbone.layers.%d.mixer.x_proj.weight": torch.empty(0),
+            "backbone.layers.%d.mixer.dt_proj.weight": torch.empty(0),
+            "backbone.layers.%d.mixer.dt_proj.bias": torch.empty(0),
+            "backbone.layers.%d.mixer.A": torch.empty(0),
+            "backbone.layers.%d.mixer.D": torch.empty(0),
+            "backbone.layers.%d.mixer.out_proj.weight": torch.empty(0),
+            "backbone.layers.%d.norm.weight": torch.empty(0),
+            "backbone.norm_f.weight": torch.empty(0),
+        }
+        serialize_fp32(
+            f,
+            model_dict["backbone.embeddings.weight"],
+            activations["backbone.embeddings.weight"],
+            num_bits,
+        )
 
         layer_weights: list[str] = [
             "backbone.layers.%d.mixer.in_proj.weight",
@@ -92,9 +116,14 @@ def model_export(
         for layer in layer_weights:
             print(f"writing {layer}")
             for n in range(config.n_layer):
-                serialize_fp32(f, model_dict[layer % n], num_bits)
+                serialize_fp32(f, model_dict[layer % n], activations[layer], num_bits)
 
-        serialize_fp32(f, model_dict["backbone.norm_f.weight"], num_bits)
+        serialize_fp32(
+            f,
+            model_dict["backbone.norm_f.weight"],
+            activations["backbone.norm_f.weight"],
+            num_bits,
+        )
     print("model written to", path)
 
 
@@ -155,7 +184,7 @@ def main() -> None:
         "--bits",
         type=int,
         default=32,
-        help="Number of bits for quantization",
+        help="Number of bits for quantization, use 8 for now until I figure out a better way to generalize it",
     )
     args: Namespace = parser.parse_args()
 
