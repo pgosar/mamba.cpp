@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <math.h>
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
@@ -111,7 +112,7 @@ inline void broadcast_multiply(float *out, float *x, float *y, int d, int n) {
 }
 
 inline void elementwise_multiply(float *result, float *matrix1, float *matrix2,
-                          int total_elements) {
+                                 int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] * matrix2[i];
@@ -119,15 +120,16 @@ inline void elementwise_multiply(float *result, float *matrix1, float *matrix2,
 }
 
 inline void elementwise_add(float *result, float *matrix1, float *matrix2,
-                     int total_elements) {
+                            int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] + matrix2[i];
   }
 }
 
-inline void elementwise_multiply_and_add(float *result, float *matrix1, float *matrix2,
-                                  float *matrix3, int total_elements) {
+inline void elementwise_multiply_and_add(float *result, float *matrix1,
+                                         float *matrix2, float *matrix3,
+                                         int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] * matrix2[i] + matrix3[i];
@@ -144,7 +146,8 @@ inline void outer_product(float *out, float *x, float *y, int d, int n) {
   }
 }
 
-inline void sum_along_last_dim(float *result, float *matrix, int rows, int cols) {
+inline void sum_along_last_dim(float *result, float *matrix, int rows,
+                               int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     float val = 0.0f;

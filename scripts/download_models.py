@@ -2,7 +2,7 @@
 
 import struct
 from argparse import ArgumentParser, Namespace, Action
-from typing import BinaryIO
+from typing import BinaryIO, Tuple
 from os import makedirs
 import torch
 from torch import Tensor
@@ -10,7 +10,7 @@ from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
 
 
 def quantize_tensor(tensor: Tensor, num_bits: int) -> Tensor:
-    x_range: int = int(torch.max(tensor) - torch.min(tensor))
+    x_range: float = float(torch.max(tensor) - torch.min(tensor))
     x_range = 1 if x_range == 0 else x_range
     num: int = 2 ** (num_bits - 1)
     scale: float = num / x_range
@@ -20,30 +20,48 @@ def quantize_tensor(tensor: Tensor, num_bits: int) -> Tensor:
         -num,
         num - 1,
     )
-    return x_quant.to(tensor.dtype)
+    return x_quant
 
 
 def preprocess(
-    tensor: Tensor, activations: Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
+    tensor: torch.Tensor, activations: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
     sparsity_threshold: float = 1e-3
     activation_threshold = 0.5
     # introduce sparsity
     tensor = torch.where(
         tensor.abs() < sparsity_threshold, torch.zeros_like(tensor), tensor
     )
-    is_activated: Tensor = (activations.abs() > activation_threshold).to(torch.bool)
+    is_activated: torch.Tensor = (activations.abs() > activation_threshold).to(
+        torch.bool
+    )
     return tensor, is_activated
 
 
 def serialize_fp32(
-    file: BinaryIO, tensor: Tensor, is_activated: Tensor, num_bits: int
+    file: BinaryIO, tensor: torch.Tensor, is_activated: torch.Tensor, num_bits: int
 ) -> None:
-    if num_bits < 32:
-        tensor = quantize_tensor(tensor, num_bits)
-    d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
-    d, is_activated = preprocess(d, is_activated)
-    b: bytes = struct.pack(f"{len(d)}f", *d.numpy(), *is_activated.numpy())
+    tensor = tensor.detach().cpu().view(-1)
+    # tensor, is_activated = preprocess(tensor, is_activated)
+
+    quantized_tensor: Tensor = quantize_tensor(tensor, num_bits)
+
+    # Determine the appropriate data type based on num_bits
+    if num_bits <= 8:
+        dtype = torch.int8
+        fmt = "b"
+    elif num_bits <= 16:
+        dtype = torch.int16
+        fmt = "h"
+    else:
+        dtype = torch.int32
+        fmt = "i"
+
+    # Convert quantized tensor to the appropriate dtype
+    quantized_tensor = quantized_tensor.to(dtype)
+    b: bytes = struct.pack(
+        f"{len(quantized_tensor)}{fmt}", *quantized_tensor.numpy()
+    )  # *isactivated.numpy())
     _ = file.write(b)
 
 
@@ -57,7 +75,7 @@ def model_export(
         d_state: int = model_dict["backbone.layers.0.mixer.A_log"].shape[1]
         d_conv: int = model_dict["backbone.layers.0.mixer.conv1d.weight"].shape[2]
         header: bytes = struct.pack(
-            "iiiiiiii",
+            "iiiiiii",
             config.n_layer,
             config.vocab_size,
             config.hidden_size,
@@ -65,7 +83,7 @@ def model_export(
             dt_rank,
             d_state,
             d_conv,
-            num_bits,
+            # num_bits,
         )
         _ = f.write(header)
 

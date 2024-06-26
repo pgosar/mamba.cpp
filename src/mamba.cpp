@@ -14,6 +14,7 @@
 #include "math.hpp"
 #include "tokenizer.hpp"
 #include "util.hpp"
+#include "flash_mem.hpp"
 
 // ----------------------------------------------------------------------------
 
@@ -458,7 +459,7 @@ int main(int argc, char *argv[]) {
           mamba.config.vocab_size, mamba.config.rounded_vocab_size,
           mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
           mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv);
-
+  
   if (steps == 0)
     steps = 256; // override to default len if 0
 
