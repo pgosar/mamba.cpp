@@ -1,1 +1,1 @@
-./build/mamba models/model.bin -n 200 -i "Recommend fun dinner ideas." -t 0.0 -r 0.95
+./build/mamba models/model.bin -n 100 -i "What is poetry?" -t 1.0 -r 0.95
