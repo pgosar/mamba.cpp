@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include <iostream>
 
 #include "mamba.hpp"
 #include "math.hpp"

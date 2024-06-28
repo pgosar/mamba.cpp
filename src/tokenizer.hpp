@@ -54,7 +54,7 @@ void build_tokenizer(Tokenizer *t, char *tokenizer_path, int model_vocab_size) {
     exit(EXIT_FAILURE);
   }
   // malloc space for the vocab
-  t->vocab_size = vocab_size;
+  t->vocab_size = vocab_size; 
   t->vocab = (char **)malloc(vocab_size * sizeof(char *));
   if (!t->vocab) {
     fprintf(stderr, "malloc failed\n");
@@ -282,6 +282,7 @@ int sample_argmax(float *probabilities, int n) {
   // return the index that has the highest probability
   int max_i = 0;
   float max_p = probabilities[0];
+  
   for (int i = 1; i < n; i++) {
     if (probabilities[i] > max_p) {
       max_i = i;
@@ -385,6 +386,7 @@ float random_f32(unsigned long long *state) { // random float32 in [0,1)
 int sample(Sampler *sampler, float *logits) {
   // sample the token given the logits and some hyperparameters
   int next;
+
   if (sampler->temperature == 0.0f) {
     // greedy argmax sampling: take the token with the highest probability
     next = sample_argmax(logits, sampler->vocab_size);

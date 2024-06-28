@@ -1,9 +1,10 @@
 # pyright: basic
 
 import struct
+import json
 from argparse import ArgumentParser, Namespace, Action
 from typing import BinaryIO
-from os import makedirs
+from os import makedirs, path
 import torch
 from torch import Tensor
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
@@ -43,7 +44,8 @@ def serialize_fp32(
         tensor = quantize_tensor(tensor, num_bits)
     d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
     d, is_activated = preprocess(d, is_activated)
-    b: bytes = struct.pack(f"{len(d)}f", *d.numpy(), *is_activated.numpy())
+    b: bytes = struct.pack(f"{len(d)}f", *d.numpy()) #, *is_activated.numpy())
+    #TODO pack bools from is_activated more tightly 
     _ = file.write(b)
 
 
@@ -146,6 +148,20 @@ def tokenizer_export(model: str, path: str) -> None:
             _ = f.write(struct.pack("i", len(token_bytes)))
             _ = f.write(token_bytes)
 
+def load_config(model_name: str):
+    from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
+    from transformers.utils.hub import cached_file
+
+    config_path = cached_file("state-spaces/mamba-" + model_name + "-hf", 
+                              CONFIG_NAME, 
+                              _raise_exceptions_for_missing_entries=False)
+   
+    with open(config_path) as f:
+        config = json.load(f)
+    
+    config = Namespace(**config)
+    print(vars(config))
+    return vars(config)
 
 def main() -> None:
     makedirs("models", exist_ok=True)
@@ -188,12 +204,10 @@ def main() -> None:
     )
     args: Namespace = parser.parse_args()
 
-    model: MambaForCausalLM = MambaForCausalLM.from_pretrained(
-        "state-spaces/mamba-" + args.model + "-hf"
-    )
+    model: MambaForCausalLM = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf")
 
     config: MambaConfig = MambaConfig.from_pretrained(
-        "state-spaces/mamba-" + args.model + "-hf"
+        "state-spaces/mamba-" + args.model
     )
     model_export(model, config, args.model_dir, args.bits)
     tokenizer_export(args.tokenizer, args.tokenizer_dir)

@@ -144,6 +144,9 @@ inline void load_model_file(char *model_path, Config *config,
   } else {
     config->rounded_vocab_size = config->vocab_size;
   }
+ 
+  // adjust dimensions to account for activation bool tensor
+ 
   // figure out the file size
   fseek(file, 0, SEEK_END); // move file pointer to end of file
   *file_size = ftell(file); // get the file size, in bytes
