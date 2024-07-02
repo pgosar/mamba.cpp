@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <random>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,6 +13,9 @@
 
 #define BOS 0
 #define EOS 0
+
+std::mt19937 gen(std::random_device{}());
+std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
 typedef struct {
   char *str;
@@ -275,7 +279,6 @@ typedef struct {
   ProbIndex *probindex; // buffer used in top-p sampling
   float temperature;
   float topp;
-  unsigned long long rng_state;
 } Sampler;
 
 int sample_argmax(float *probabilities, int n) {
@@ -359,11 +362,10 @@ int sample_topp(float *probabilities, int n, float topp, ProbIndex *probindex,
 }
 
 void build_sampler(Sampler *sampler, int vocab_size, float temperature,
-                   float topp, unsigned long long rng_seed) {
+                   float topp) {
   sampler->vocab_size = vocab_size;
   sampler->temperature = temperature;
   sampler->topp = topp;
-  sampler->rng_state = rng_seed;
   // buffer only used with nucleus sampling; may not need but it's ~small
   sampler->probindex =
       (ProbIndex *)malloc(sampler->vocab_size * sizeof(ProbIndex));
@@ -371,16 +373,9 @@ void build_sampler(Sampler *sampler, int vocab_size, float temperature,
 
 void free_sampler(Sampler *sampler) { free(sampler->probindex); }
 
-unsigned int random_u32(unsigned long long *state) {
-  // xorshift rng: https://en.wikipedia.org/wiki/Xorshift#xorshift.2A
-  *state ^= *state >> 12;
-  *state ^= *state << 25;
-  *state ^= *state >> 27;
-  return (*state * 0x2545F4914F6CDD1Dull) >> 32;
-}
-float random_f32(unsigned long long *state) { // random float32 in [0,1)
-  return (random_u32(state) >> 8) / 16777216.0f;
-}
+unsigned int random_u32() { return gen(); }
+
+float random_f32() { return dis(gen); }
 
 int sample(Sampler *sampler, float *logits) {
   // sample the token given the logits and some hyperparameters
@@ -396,7 +391,7 @@ int sample(Sampler *sampler, float *logits) {
     // apply softmax to the logits to get the probabilities for next token
     softmax(logits, sampler->vocab_size);
     // flip a (float) coin (this is our source of entropy for sampling)
-    float coin = random_f32(&sampler->rng_state);
+    float coin = random_f32();
     // we sample from this distribution to get the next token
     if (sampler->topp <= 0 || sampler->topp >= 1) {
       // simply sample from the predicted probability distribution
