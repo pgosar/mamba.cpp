@@ -17,8 +17,10 @@
 #include "util.hpp"
 
 // ----------------------------------------------------------------------------
+// TODO: get rid of all the inlines by separating the hpp files into proper
+// header files change all the char arrays to std::strings
 
-void forward_layer(Mamba *mamba, unsigned long long l, float *hidden_state) {
+void forward_layer(Mamba *mamba, size_t l, float *hidden_state) {
   Config *p = &mamba->config;
   MambaWeights *w = &mamba->weights;
   RunState *s = &mamba->state;
@@ -127,7 +129,7 @@ float *forward(Mamba *mamba, int token) {
   memcpy(input, content_row, dim * sizeof(float));
 
   // forward all the layers
-  for (unsigned long long l = 0; l < p->n_layers; l++) {
+  for (int l = 0; l < p->n_layers; l++) {
     // normalize the input
     rmsnorm(hidden_state, input, w->norm + l * dim, dim);
     // forward this layer
@@ -153,9 +155,8 @@ float *forward(Mamba *mamba, int token) {
 
 void generate(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
               char *prompt, int steps, UserConfig userConfig) {
-  char *empty_prompt = "";
   if (prompt == NULL) {
-    prompt = empty_prompt;
+    prompt = "";
   }
 
   // encode the (string) prompt into tokens sequence
@@ -280,8 +281,7 @@ void chat(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
   int8_t user_turn = 1; // user starts
   int next;             // will store the next token in the sequence
   int token;            // stores the current token to feed into the model
-  int prev_token;
-  int pos = 0; // position in the sequence
+  int pos = 0;          // position in the sequence
   while (pos < steps) {
 
     // when it is the user's turn to contribute tokens to the dialog...
@@ -308,11 +308,14 @@ void chat(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
       }
       // render user/system prompts into the Llama 2 Chat schema
       if (pos == 0 && system_prompt[0] != '\0') {
-        char system_template[] = "[INST] <<SYS>>\n%s\n<</SYS>>\n\n%s [/INST]";
-        sprintf(rendered_prompt, system_template, system_prompt, user_prompt);
+        const char system_template[] =
+            "[INST] <<SYS>>\n%s\n<</SYS>>\n\n%s [/INST]";
+        snprintf(rendered_prompt, sizeof(rendered_prompt), system_template,
+                 system_prompt, user_prompt);
       } else {
-        char user_template[] = "[INST] %s [/INST]";
-        sprintf(rendered_prompt, user_template, user_prompt);
+        const char user_template[] = "[INST] %s [/INST]";
+        snprintf(rendered_prompt, sizeof(rendered_prompt), user_template,
+                 user_prompt);
       }
       // encode the rendered prompt into tokens
       encode(tokenizer, rendered_prompt, 0, 0, prompt_tokens,
@@ -460,7 +463,7 @@ int main(int argc, char *argv[]) {
 
   // build the Tokenizer via the tokenizer .bin file
   Tokenizer tokenizer;
-  build_tokenizer(&tokenizer, tokenizer_path, mamba.config.vocab_size);
+  build_tokenizer(&tokenizer, tokenizer_path);
 
   // build the Sampler
   Sampler sampler;

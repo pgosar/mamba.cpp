@@ -2,37 +2,44 @@
 #define UTIL_HPP
 
 #include <fcntl.h>
+#include <fstream>
+#include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <unistd.h>
 #include <vector>
 
 #include "mamba.hpp"
 
 inline void malloc_run_state(RunState *s, Config *p) {
   // memory reused by all layers
-  s->input = (float *)malloc(p->dim * sizeof(float));
-  s->hidden_state = (float *)malloc(p->dim * sizeof(float));
-  s->xz = (float *)malloc(2 * p->d_inner * sizeof(float));
-  s->x_db = (float *)malloc((p->dt_rank + 2 * p->d_state) * sizeof(float));
-  s->dt = (float *)malloc(p->d_inner * sizeof(float));
-  s->dA = (float *)malloc(p->d_inner * p->d_state * sizeof(float));
-  s->dB = (float *)malloc(p->d_inner * p->d_state * sizeof(float));
-  s->temp = (float *)malloc(p->d_inner * p->d_state * sizeof(float));
-  s->y = (float *)malloc(p->d_inner * sizeof(float));
-  s->logits = (float *)malloc(p->rounded_vocab_size * sizeof(float));
-  // internal state, separate memory for each layer
-  s->conv_state =
-      (float *)calloc(p->n_layers * p->d_inner * p->d_conv, sizeof(float));
-  s->ssm_state =
-      (float *)calloc(p->n_layers * p->d_inner * p->d_state, sizeof(float));
-  // ensure all mallocs went fine
-  if (!s->xz || !s->x_db || !s->dt || !s->dA || !s->dB || !s->temp || !s->y ||
-      !s->logits || !s->conv_state || !s->ssm_state) {
-    fprintf(stderr, "malloc failed!\n");
-    exit(EXIT_FAILURE);
+  try {
+    s->input = static_cast<float *>(malloc(p->dim * sizeof(float)));
+    s->hidden_state = static_cast<float *>(malloc(p->dim * sizeof(float)));
+    s->xz = static_cast<float *>(malloc(2 * p->d_inner * sizeof(float)));
+    s->x_db = static_cast<float *>(
+        malloc((p->dt_rank + 2 * p->d_state) * sizeof(float)));
+    s->dt = static_cast<float *>(malloc(p->d_inner * sizeof(float)));
+    s->dA =
+        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
+    s->dB =
+        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
+    s->temp =
+        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
+    s->y = static_cast<float *>(malloc(p->d_inner * sizeof(float)));
+    s->logits =
+        static_cast<float *>(malloc(p->rounded_vocab_size * sizeof(float)));
+    // internal state, separate memory for each layer
+    s->conv_state = static_cast<float *>(
+        calloc(p->n_layers * p->d_inner * p->d_conv, sizeof(float)));
+    s->ssm_state = static_cast<float *>(
+        calloc(p->n_layers * p->d_inner * p->d_state, sizeof(float)));
+  } catch (std::bad_alloc &e) {
+    std::cerr << "Memory allocation failed: " << e.what() << std::endl;
+    std::exit(EXIT_FAILURE);
   }
 }
 
@@ -44,38 +51,6 @@ inline void reset_internal_state(Mamba *mamba) {
          p->n_layers * p->d_inner * p->d_conv * sizeof(float));
   memset(s->ssm_state, 0,
          p->n_layers * p->d_inner * p->d_state * sizeof(float));
-}
-
-inline char *get_internal_state(Mamba *mamba, int *state_size) {
-  // get the internal state of the model
-  Config *p = &mamba->config;
-  RunState *s = &mamba->state;
-  unsigned int conv_state_size =
-      p->n_layers * p->d_inner * p->d_conv * sizeof(float);
-  unsigned int ssm_state_size =
-      p->n_layers * p->d_inner * p->d_state * sizeof(float);
-  unsigned int total_size = conv_state_size + ssm_state_size;
-  char *state = (char *)malloc(total_size);
-  if (state) {
-    memcpy(state, s->conv_state, conv_state_size);
-    memcpy(state + conv_state_size, s->ssm_state, ssm_state_size);
-    *state_size = total_size;
-  }
-  return state;
-}
-
-inline void set_internal_state(Mamba *mamba, char *state, int state_size) {
-  // set the internal state of the model
-  Config *p = &mamba->config;
-  RunState *s = &mamba->state;
-  unsigned int conv_state_size =
-      p->n_layers * p->d_inner * p->d_conv * sizeof(float);
-  unsigned int ssm_state_size =
-      p->n_layers * p->d_inner * p->d_state * sizeof(float);
-  if (state_size == conv_state_size + ssm_state_size) {
-    memcpy(s->conv_state, state, conv_state_size);
-    memcpy(s->ssm_state, state + conv_state_size, ssm_state_size);
-  }
 }
 
 inline void free_run_state(RunState *s) {
@@ -126,39 +101,48 @@ inline void memory_map_weights(MambaWeights *w, Config *p, float *ptr) {
   w->lm_head = w->token_embedding_table;
 }
 
-inline void load_model_file(char *model_path, Config *config,
+inline void load_model_file(const std::string &model_path, Config *config,
                             MambaWeights *weights, int *fd, float **data,
-                            ssize_t *file_size) {
-  FILE *file = fopen(model_path, "rb");
+                            std::size_t *file_size) {
+  std::ifstream file(model_path, std::ios::binary | std::ios::ate);
   if (!file) {
-    fprintf(stderr, "Couldn't open file %s\n", model_path);
-    exit(EXIT_FAILURE);
+    std::cerr << "Couldn't open file " << model_path << std::endl;
+    std::exit(EXIT_FAILURE);
   }
+
+  // get the file size
+  *file_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
   // read the config
-  if (fread(config, sizeof(Config), 1, file) != 1) {
-    exit(EXIT_FAILURE);
+  if (!file.read(reinterpret_cast<char *>(config), sizeof(Config))) {
+    std::exit(EXIT_FAILURE);
   }
+
   if (config->vocab_size % 8 != 0) {
     config->rounded_vocab_size =
         config->vocab_size + (8 - (config->vocab_size % 8));
   } else {
     config->rounded_vocab_size = config->vocab_size;
   }
-  // figure out the file size
-  fseek(file, 0, SEEK_END); // move file pointer to end of file
-  *file_size = ftell(file); // get the file size, in bytes
-  fclose(file);
+
+  file.close();
+
   // memory map the model weights into the data pointer
-  *fd = open(model_path, O_RDONLY); // open in read only mode
+  // TODO: check on performance of mmap vs alternatives
+  *fd = open(model_path.c_str(), O_RDONLY);
   if (*fd == -1) {
-    fprintf(stderr, "open failed!\n");
-    exit(EXIT_FAILURE);
+    std::cerr << "open failed!" << std::endl;
+    std::exit(EXIT_FAILURE);
   }
-  *data = (float *)mmap(NULL, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
+
+  *data = static_cast<float *>(
+      mmap(nullptr, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0));
   if (*data == MAP_FAILED) {
-    fprintf(stderr, "mmap failed!\n");
-    exit(EXIT_FAILURE);
+    std::cerr << "mmap failed!" << std::endl;
+    std::exit(EXIT_FAILURE);
   }
+
   float *weights_ptr = *data + (256 / 4);
   memory_map_weights(weights, config, weights_ptr);
 }
@@ -202,7 +186,7 @@ inline void apply_repetition_penalty(float *logits,
     return;
 
   // Gather -> Handle Negative -> Scatter
-  for (int i = 0; i < prev_tokens.size(); i++) {
+  for (size_t i = 0; i < prev_tokens.size(); i++) {
     float score = logits[prev_tokens[i]];
     logits[prev_tokens[i]] = score > 0 ? score * penalty : score / penalty;
   }

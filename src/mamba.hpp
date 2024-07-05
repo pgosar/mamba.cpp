@@ -63,9 +63,9 @@ typedef struct {
   MambaWeights weights; // the weights of the model
   RunState state; // buffers for the "wave" of activations in the forward pass
   // some more state needed to properly clean up the memory mapping (sigh)
-  int fd;            // file descriptor for memory mapping
-  float *data;       // memory mapped data pointer
-  ssize_t file_size; // size of the checkpoint file in bytes
+  int fd;           // file descriptor for memory mapping
+  float *data;      // memory mapped data pointer
+  size_t file_size; // size of the checkpoint file in bytes
 } Mamba;
 
 #endif // MAMBA_HPP

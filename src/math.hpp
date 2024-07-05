@@ -1,4 +1,6 @@
-#include <cstdio>
+#ifndef MATH_HPP
+#define MATH_HPP
+
 #include <math.h>
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
@@ -157,3 +159,5 @@ inline void sum_along_last_dim(float *result, float *matrix, int rows,
     result[i] = val;
   }
 }
+
+#endif // MATH_HPP
