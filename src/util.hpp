@@ -124,6 +124,10 @@ inline void memory_map_weights(MambaWeights *w, Config *p, float *ptr) {
   ptr += p->dim;
   // the classifier weights can be shared with the token embedding table
   w->lm_head = w->token_embedding_table;
+  /*for(int i = 0; i < p->rounded_vocab_size * p->dim; i++) {
+	 if(w->token_embedding_table[i] != 0) 
+	  std::cout << w->token_embedding_table[i] << std::endl;
+  }*/
 }
 
 inline void load_model_file(char *model_path, Config *config,

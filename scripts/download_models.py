@@ -9,19 +9,21 @@ import torch
 from torch import Tensor
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
 
+pr = True
 
-def quantize_tensor(tensor: Tensor, num_bits: int) -> Tensor:
-    x_range: int = int(torch.max(tensor) - torch.min(tensor))
+def quantize_tensor(tensor: Tensor, num_bits: int) -> tuple[Tensor, float, float]:
+    x_range: float = float(torch.max(tensor) - torch.min(tensor))
     x_range = 1 if x_range == 0 else x_range
     num: int = 2 ** (num_bits - 1)
-    scale: float = num / x_range
-    zeropoint: Tensor = (-scale * torch.min(tensor) - num).round()
+    scale: float = (2*num) / x_range
+    zeropoint: float = float((-scale * torch.min(tensor) - num).round())
     x_quant: Tensor = torch.clip(
         (tensor * scale + zeropoint).round(),
         -num,
         num - 1,
     )
-    return x_quant.to(tensor.dtype)
+    
+    return x_quant.to(torch.int16), scale, zeropoint #hardcoded for now; fix this
 
 
 def preprocess(
@@ -41,10 +43,14 @@ def serialize_fp32(
     file: BinaryIO, tensor: Tensor, is_activated: Tensor, num_bits: int
 ) -> None:
     if num_bits < 32:
-        tensor = quantize_tensor(tensor, num_bits)
-    d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
-    d, is_activated = preprocess(d, is_activated)
-    b: bytes = struct.pack(f"{len(d)}f", *d.numpy()) #, *is_activated.numpy())
+        tensor, scale, zeropoint = quantize_tensor(tensor, num_bits)
+    #d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
+    d: Tensor = tensor.detach().cpu().view(-1) #temp
+    #d, is_activated = preprocess(d, is_activated)
+    if num_bits < 32:
+        b: bytes = struct.pack(f"{len(d)}h", *d.numpy())
+    else: 
+        b: bytes = struct.pack(f"{len(d)}f", *d.numpy())#, is_activated.numpy()) #TODO reintroduce
     #TODO pack bools from is_activated more tightly 
     _ = file.write(b)
 
