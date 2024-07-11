@@ -9,8 +9,6 @@ import torch
 from torch import Tensor
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
 
-pr = True
-
 def quantize_tensor(tensor: Tensor, num_bits: int) -> tuple[Tensor, float, float]:
     x_range: float = float(torch.max(tensor) - torch.min(tensor))
     x_range = 1 if x_range == 0 else x_range
@@ -48,7 +46,8 @@ def serialize_fp32(
     d: Tensor = tensor.detach().cpu().view(-1) #temp
     #d, is_activated = preprocess(d, is_activated)
     if num_bits < 32:
-        b: bytes = struct.pack(f"{len(d)}h", *d.numpy())
+        # need to specify endianess here
+        b: bytes = struct.pack(f"<ff{len(d)}h", scale, zeropoint, *d.numpy())
     else: 
         b: bytes = struct.pack(f"{len(d)}f", *d.numpy())#, is_activated.numpy()) #TODO reintroduce
     #TODO pack bools from is_activated more tightly 
@@ -73,7 +72,7 @@ def model_export(
             dt_rank,
             d_state,
             d_conv,
-            num_bits,
+            num_bits
         )
         _ = f.write(header)
 
@@ -139,10 +138,10 @@ def tokenizer_export(model: str, path: str) -> None:
     print("exporting tokenizer...")
     tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(
         "state-spaces/mamba-" + model + "-hf"
-    )
+    ) # type: ignore
     tokens: list[bytes] = []
     for i in range(50277):
-        t: str = tokenizer.decode([i])
+        t: str = tokenizer.decode([i]) # type: ignore
         b: bytes = t.encode("utf-8")
         tokens.append(b)
 
@@ -162,7 +161,7 @@ def load_config(model_name: str):
                               CONFIG_NAME, 
                               _raise_exceptions_for_missing_entries=False)
    
-    with open(config_path) as f:
+    with open(config_path) as f: # type: ignore
         config = json.load(f)
     
     config = Namespace(**config)
@@ -210,11 +209,11 @@ def main() -> None:
     )
     args: Namespace = parser.parse_args()
 
-    model: MambaForCausalLM = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf")
+    model: MambaForCausalLM = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf") # type: ignore
 
     config: MambaConfig = MambaConfig.from_pretrained(
         "state-spaces/mamba-" + args.model
-    )
+    ) # type: ignore
     model_export(model, config, args.model_dir, args.bits)
     tokenizer_export(args.tokenizer, args.tokenizer_dir)
 
