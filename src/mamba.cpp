@@ -1,6 +1,7 @@
 /* Inference for Mamba model in pure C */
 
 #include <fcntl.h>
+#include <iostream>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +10,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
-#include <iostream>
 
 #include "flash_mem.hpp"
 #include "mamba.hpp"
@@ -454,10 +454,11 @@ int main(int argc, char *argv[]) {
   // print the config
   fprintf(stderr,
           "config: vocab_size=%d (%d), n_layers=%d, dim=%d, d_inner=%d, "
-          "dt_rank=%d, d_state=%d, d_conv=%d\n",
+          "dt_rank=%d, d_state=%d, d_conv=%d, bits=%d\n",
           mamba.config.vocab_size, mamba.config.rounded_vocab_size,
           mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
-          mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv);
+          mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv,
+          mamba.config.num_bits);
 
   if (steps == 0)
     steps = 256; // override to default len if 0
