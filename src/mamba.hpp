@@ -13,6 +13,7 @@ typedef struct {
   int dt_rank;
   int d_state;
   int d_conv;
+  int num_bits;
   int rounded_vocab_size; // vocab_size rounded up to the nearest multiple of 8
 } Config;
 
