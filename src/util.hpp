@@ -14,38 +14,34 @@
 
 #include "mamba.hpp"
 
-inline void malloc_run_state(RunState *s, Config *p) {
+template <typename T> inline void malloc_run_state(RunState<T> *s, Config *p) {
   // memory reused by all layers
   try {
-    s->input = static_cast<float *>(malloc(p->dim * sizeof(float)));
-    s->hidden_state = static_cast<float *>(malloc(p->dim * sizeof(float)));
-    s->xz = static_cast<float *>(malloc(2 * p->d_inner * sizeof(float)));
-    s->x_db = static_cast<float *>(
-        malloc((p->dt_rank + 2 * p->d_state) * sizeof(float)));
-    s->dt = static_cast<float *>(malloc(p->d_inner * sizeof(float)));
-    s->dA =
-        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
-    s->dB =
-        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
-    s->temp =
-        static_cast<float *>(malloc(p->d_inner * p->d_state * sizeof(float)));
-    s->y = static_cast<float *>(malloc(p->d_inner * sizeof(float)));
-    s->logits =
-        static_cast<float *>(malloc(p->rounded_vocab_size * sizeof(float)));
+    s->input = static_cast<T *>(malloc(p->dim * sizeof(T)));
+    s->hidden_state = static_cast<T *>(malloc(p->dim * sizeof(T)));
+    s->xz = static_cast<T *>(malloc(2 * p->d_inner * sizeof(T)));
+    s->x_db =
+        static_cast<T *>(malloc((p->dt_rank + 2 * p->d_state) * sizeof(T)));
+    s->dt = static_cast<T *>(malloc(p->d_inner * sizeof(T)));
+    s->dA = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
+    s->dB = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
+    s->temp = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
+    s->y = static_cast<T *>(malloc(p->d_inner * sizeof(T)));
+    s->logits = static_cast<T *>(malloc(p->rounded_vocab_size * sizeof(T)));
     // internal state, separate memory for each layer
-    s->conv_state = static_cast<float *>(
-        calloc(p->n_layers * p->d_inner * p->d_conv, sizeof(float)));
-    s->ssm_state = static_cast<float *>(
-        calloc(p->n_layers * p->d_inner * p->d_state, sizeof(float)));
+    s->conv_state = static_cast<T *>(
+        calloc(p->n_layers * p->d_inner * p->d_conv, sizeof(T)));
+    s->ssm_state = static_cast<T *>(
+        calloc(p->n_layers * p->d_inner * p->d_state, sizeof(T)));
   } catch (std::bad_alloc &e) {
     std::cerr << "Memory allocation failed: " << e.what() << std::endl;
     std::exit(EXIT_FAILURE);
   }
 }
 
-inline void reset_internal_state(Mamba *mamba) {
+template <typename T> inline void reset_internal_state(Mamba<T> *mamba) {
   // reset the internal state of the model
-  RunState *s = &mamba->state;
+  RunState<T> *s = &mamba->state;
   Config *p = &mamba->config;
   memset(s->conv_state, 0,
          p->n_layers * p->d_inner * p->d_conv * sizeof(float));
@@ -53,7 +49,7 @@ inline void reset_internal_state(Mamba *mamba) {
          p->n_layers * p->d_inner * p->d_state * sizeof(float));
 }
 
-inline void free_run_state(RunState *s) {
+template <typename T> inline void free_run_state(RunState<T> *s) {
   free(s->input);
   free(s->hidden_state);
   free(s->xz);
@@ -68,7 +64,8 @@ inline void free_run_state(RunState *s) {
   free(s->ssm_state);
 }
 
-inline void memory_map_weights(MambaWeights *w, Config *p, float *ptr) {
+template <typename T>
+inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
   // the multiplications below are done in 64-bit to fit the parameter counts of
   // 13B+ models
   unsigned long long n_layers = p->n_layers;
@@ -105,49 +102,49 @@ inline void memory_map_weights(MambaWeights *w, Config *p, float *ptr) {
   }*/
 }
 
-inline float *quantized_to_float_tensor(size_t dim, uint8_t num_bits,
-                                        uint8_t **ptr_to_ptr,
-                                        int n_layers = 1) {
+template <typename T>
+inline T *quantized_to_float_tensor(size_t dim, uint8_t num_bits,
+                                    uint8_t **ptr_to_ptr, int n_layers = 1) {
   uint8_t *ptr = *ptr_to_ptr;
-  float *tensor = (float *)malloc(n_layers * dim * sizeof(float));
-  uint8_t val = 0;
-  uint8_t pos = 0;
-  int16_t quant_mask = (1 << num_bits) - 1;
-  int values_per_byte = 8 / num_bits;
+  T *tensor = (T *)malloc(n_layers * dim * sizeof(T));
+
+  // uint8_t val = 0;
+  // uint8_t pos = 0;
 
   for (int l = 0; l < n_layers; l++) {
-    float *layer = tensor + l * dim;
+    T *layer = tensor + l * dim;
+
     float scale = *(float *)ptr;
     ptr += sizeof(float);
+
     float zeropoint = *(float *)ptr;
     ptr += sizeof(float);
 
     for (size_t i = 0; i < dim; i++) {
-      int16_t quantized_val = 0;
-
-      if (num_bits < 8) {
-        if (pos == 0) {
-          val = *ptr;
-          ptr++;
-        }
-        quantized_val = (val >> pos) & quant_mask;
-        pos = (pos + num_bits) % 8;
-      } else if (num_bits == 8) {
-        quantized_val = *(int8_t *)ptr;
-        ptr += sizeof(int8_t);
-      } else if (num_bits == 16) {
-        quantized_val = *(int16_t *)ptr;
-        ptr += sizeof(int16_t);
-      }
+      // int quantized_value = (*(int*)ptr) & quant_mask;
+      // short quantized_val = 0;
+      // for(int b = 0; b < num_bits; b++) {
+      //   if(pos == 0) {
+      //     ptr++;
+      //     val = *ptr;
+      //   }
+      //   quantized_val |= (val & 1) << b;
+      //   val >>= 1;
+      //   pos = (pos + 1) & 0x7;
+      // }
+      int16_t quantized_val = *(int16_t *)ptr;
+      ptr += sizeof(int16_t);
 
       layer[i] = (quantized_val - zeropoint) / scale;
     }
   }
+
   *ptr_to_ptr = ptr;
   return tensor;
 }
 
-inline void memory_map_quantized_weights(MambaWeights *w, Config *p,
+template <typename T>
+inline void memory_map_quantized_weights(MambaWeights<T> *w, Config *p,
                                          uint8_t *ptr) {
   // the multiplications below are done in 64-bit to fit the parameter counts of
   // 13B+ models
@@ -157,47 +154,48 @@ inline void memory_map_quantized_weights(MambaWeights *w, Config *p,
 
   size_t tensor_dim = p->rounded_vocab_size * p->dim;
   w->token_embedding_table =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr);
 
   tensor_dim = (2 * p->d_inner) * p->dim;
   w->in_proj =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner * 1 * p->d_conv;
   w->conv1d_weight =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner;
   w->conv1d_bias =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = (p->dt_rank + 2 * p->d_state) * p->d_inner;
   w->x_proj =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner * p->dt_rank;
   w->dt_proj_weight =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner;
   w->dt_proj_bias =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner * p->d_state;
-  w->A = quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+  w->A = quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->d_inner;
-  w->D = quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+  w->D = quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->dim * p->d_inner;
   w->out_proj =
-      quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->dim;
-  w->norm = quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr, n_layers);
+  w->norm =
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
 
   tensor_dim = p->dim;
-  w->final_norm = quantized_to_float_tensor(tensor_dim, p->num_bits, &ptr);
+  w->final_norm = quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr);
 
   // the classifier weights can be shared with the token embedding table
   w->lm_head = w->token_embedding_table;
@@ -207,9 +205,10 @@ inline void memory_map_quantized_weights(MambaWeights *w, Config *p,
   }*/
 }
 
-inline void load_model_file(const std::string &model_path, Config *config,
-                            MambaWeights *weights, int *fd, float **data,
-                            std::size_t *file_size) {
+template <typename T>
+inline void load_model_file(char *model_path, Config *config,
+                            MambaWeights<T> *weights, int *fd, T **data,
+                            size_t *file_size) {
   std::ifstream file(model_path, std::ios::binary | std::ios::ate);
   if (!file) {
     std::cerr << "Couldn't open file " << model_path << std::endl;
@@ -220,6 +219,7 @@ inline void load_model_file(const std::string &model_path, Config *config,
   *file_size = file.tellg();
   file.seekg(0, std::ios::beg);
 
+  // todo adjust dimensions to account for activation bool tensor
   // read the config
   // don't read rounded vocab size; that's computed here
   if (!file.read(reinterpret_cast<char *>(config), sizeof(Config))) {
@@ -233,24 +233,22 @@ inline void load_model_file(const std::string &model_path, Config *config,
     config->rounded_vocab_size = config->vocab_size;
   }
 
-  // todo adjust dimensions to account for activation bool tensor
-
   file.close();
 
   // memory map the model weights into the data pointer
   // TODO: check on performance of mmap vs alternatives
-  *fd = open(model_path.c_str(), O_RDONLY);
+  *fd = open(model_path, O_RDONLY);
   if (*fd == -1) {
     std::cerr << "open failed!" << std::endl;
     std::exit(EXIT_FAILURE);
   }
-  *data = static_cast<float *>(
+  *data = static_cast<T *>(
       mmap(nullptr, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0));
   if (*data == MAP_FAILED) {
     std::cerr << "mmap failed!" << std::endl;
     std::exit(EXIT_FAILURE);
   }
-  float *weights_ptr = *data + (256 / sizeof(float));
+  T *weights_ptr = *data + (256 / sizeof(float));
 
   if (config->num_bits < 32) {
     memory_map_quantized_weights(weights, config, (uint8_t *)weights_ptr);
@@ -261,7 +259,7 @@ inline void load_model_file(const std::string &model_path, Config *config,
   }
 }
 
-inline void load_model(Mamba *m, char *model_path) {
+template <typename T> inline void load_model(Mamba<T> *m, char *model_path) {
   // read the Config and the Weights from the model file
   load_model_file(model_path, &m->config, &m->weights, &m->fd, &m->data,
                   &m->file_size);
@@ -269,7 +267,7 @@ inline void load_model(Mamba *m, char *model_path) {
   malloc_run_state(&m->state, &m->config);
 }
 
-inline void free_model(Mamba *m) {
+template <typename T> inline void free_model(Mamba<T> *m) {
   // close the memory mapping
   if (m->data != MAP_FAILED) {
     munmap(m->data, m->file_size);
@@ -293,8 +291,8 @@ inline long time_in_ms() {
 
 // -------------------
 // minimize repetition
-inline void apply_repetition_penalty(float *logits,
-                                     std::vector<int> &prev_tokens,
+template <typename T>
+inline void apply_repetition_penalty(T *logits, std::vector<int> &prev_tokens,
                                      float penalty) {
   if (penalty == 1.0)
     return;

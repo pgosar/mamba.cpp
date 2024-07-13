@@ -58,7 +58,7 @@ inline void build_tokenizer(Tokenizer *t, char *tokenizer_path) {
     exit(EXIT_FAILURE);
   }
   // malloc space for the vocab
-  t->vocab_size = vocab_size; 
+  t->vocab_size = vocab_size;
   t->vocab = (char **)malloc(vocab_size * sizeof(char *));
   if (!t->vocab) {
     fprintf(stderr, "malloc failed\n");
@@ -124,7 +124,8 @@ inline void safe_printf(char *piece) {
   printf("%s", piece);
 }
 
-inline int str_lookup(const char *str, TokenIndex *sorted_vocab, int vocab_size) {
+inline int str_lookup(const char *str, TokenIndex *sorted_vocab,
+                      int vocab_size) {
   // efficiently find the perfect match for str in vocab, return its index or -1
   // if not found
   TokenIndex tok = {.str = str, .id = 0}; // acts as the key to search for
@@ -134,7 +135,7 @@ inline int str_lookup(const char *str, TokenIndex *sorted_vocab, int vocab_size)
 }
 
 inline void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
-            int *tokens, int *n_tokens) {
+                   int *tokens, int *n_tokens) {
   // encode the string text (input) into an upper-bound preallocated tokens[]
   // array add_bos != 0 means prepend the BOS token, add_eos != 0 means append
   // the EOS token
@@ -282,11 +283,11 @@ typedef struct {
   float topp;
 } Sampler;
 
-inline int sample_argmax(float *probabilities, int n) {
+template <typename T> inline int sample_argmax(T *probabilities, int n) {
   // return the index that has the highest probability
   int max_i = 0;
   float max_p = probabilities[0];
-  
+
   for (int i = 1; i < n; i++) {
     if (probabilities[i] > max_p) {
       max_i = i;
@@ -296,7 +297,8 @@ inline int sample_argmax(float *probabilities, int n) {
   return max_i;
 }
 
-inline int sample_mult(float *probabilities, int n, float coin) {
+template <typename T>
+inline int sample_mult(T *probabilities, int n, float coin) {
   // sample index from probabilities (they must sum to 1!)
   // coin is a random number in [0, 1), usually from random_f32()
   float cdf = 0.0f;
@@ -319,8 +321,9 @@ inline int compare(const void *a, const void *b) {
   return 0;
 }
 
-inline int sample_topp(float *probabilities, int n, float topp, ProbIndex *probindex,
-                float coin) {
+template <typename T>
+inline int sample_topp(T *probabilities, int n, float topp,
+                       ProbIndex *probindex, float coin) {
   // top-p sampling (or "nucleus sampling") samples from the smallest set of
   // tokens that exceed probability topp. This way we never sample tokens that
   // have very low probabilities and are less likely to go "off the rails".
@@ -364,7 +367,7 @@ inline int sample_topp(float *probabilities, int n, float topp, ProbIndex *probi
 }
 
 inline void build_sampler(Sampler *sampler, int vocab_size, float temperature,
-                   float topp) {
+                          float topp) {
   sampler->vocab_size = vocab_size;
   sampler->temperature = temperature;
   sampler->topp = topp;
@@ -379,7 +382,7 @@ inline unsigned int random_u32() { return gen(); }
 
 inline float random_f32() { return dis(gen); }
 
-inline int sample(Sampler *sampler, float *logits) {
+template <typename T> inline int sample(Sampler *sampler, T *logits) {
   // sample the token given the logits and some hyperparameters
   int next;
 

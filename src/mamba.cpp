@@ -21,27 +21,28 @@
 // TODO: get rid of all the inlines by separating the hpp files into proper
 // header files change all the char arrays to std::strings
 
-void forward_layer(Mamba *mamba, size_t l, float *hidden_state) {
+template <typename T>
+void forward_layer(Mamba<T> *mamba, size_t l, T *hidden_state) {
   Config *p = &mamba->config;
-  MambaWeights *w = &mamba->weights;
-  RunState *s = &mamba->state;
+  MambaWeights<T> *w = &mamba->weights;
+  RunState<T> *s = &mamba->state;
   int dim = p->dim, d_inner = p->d_inner, d_conv = p->d_conv,
       d_state = p->d_state, dt_rank = p->dt_rank;
-  float *dA = s->dA; // (d_inner, d_state)
-  float *dB = s->dB; // (d_inner, d_state)
-  float *y = s->y;   // (d_inner)
+  T *dA = s->dA; // (d_inner, d_state)
+  T *dB = s->dB; // (d_inner, d_state)
+  T *y = s->y;   // (d_inner)
 
   // conv_state, ssm_state = self._get_states_from_cache(inference_params)
-  float *conv_state = s->conv_state + l * d_inner * d_conv;
-  float *ssm_state = s->ssm_state + l * d_inner * d_state;
+  T *conv_state = s->conv_state + l * d_inner * d_conv;
+  T *ssm_state = s->ssm_state + l * d_inner * d_state;
 
   // xz = self.in_proj(hidden_states)  # hidden_states: (dim), in_proj
   // (2*d_inner, dim), xz (2*d_inner)
   matmul(s->xz, hidden_state, w->in_proj + l * 2 * d_inner * dim, 2 * d_inner,
          dim);
   // x, z = xz.chunk(2, dim=-1)
-  float *x = s->xz;           // x (d_inner)
-  float *z = s->xz + d_inner; // z (d_inner)
+  T *x = s->xz;           // x (d_inner)
+  T *z = s->xz + d_inner; // z (d_inner)
 
   // Conv step
 
@@ -69,9 +70,9 @@ void forward_layer(Mamba *mamba, size_t l, float *hidden_state) {
          dt_rank + 2 * d_state, d_inner);
   // dt, B, C = torch.split(x_db, [self.dt_rank, self.d_state, self.d_state],
   // dim=-1)
-  float *dt = s->x_db;                    // dt (dt_rank)
-  float *B = s->x_db + dt_rank;           // B  (d_state)
-  float *C = s->x_db + dt_rank + d_state; // C  (d_state)
+  T *dt = s->x_db;                    // dt (dt_rank)
+  T *B = s->x_db + dt_rank;           // B  (d_state)
+  T *C = s->x_db + dt_rank + d_state; // C  (d_state)
 
   // dt = self.dt_proj(dt)   # dt (dt_rank), dt_proj_weight (d_inner, dt_rank),
   // dt_proj_bias (d_inner)
@@ -116,18 +117,18 @@ void forward_layer(Mamba *mamba, size_t l, float *hidden_state) {
   matmul(hidden_state, y, w->out_proj + l * dim * d_inner, dim, d_inner);
 }
 
-float *forward(Mamba *mamba, int token) {
+template <typename T> T *forward(Mamba<T> *mamba, int token) {
   // a few convenience variables
   Config *p = &mamba->config;
-  MambaWeights *w = &mamba->weights;
-  RunState *s = &mamba->state;
+  MambaWeights<T> *w = &mamba->weights;
+  RunState<T> *s = &mamba->state;
   int dim = p->dim;
-  float *input = s->input;
-  float *hidden_state = s->hidden_state;
+  T *input = s->input;
+  T *hidden_state = s->hidden_state;
 
   // copy the token embedding into x
-  float *content_row = w->token_embedding_table + token * dim;
-  memcpy(input, content_row, dim * sizeof(float));
+  T *content_row = w->token_embedding_table + token * dim;
+  memcpy(input, content_row, dim * sizeof(T));
 
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {
@@ -154,7 +155,8 @@ float *forward(Mamba *mamba, int token) {
 // ----------------------------------------------------------------------------
 // generation loop
 
-void generate(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
+template <typename T>
+void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
               char *prompt, int steps, UserConfig userConfig) {
   if (prompt == NULL) {
     prompt = "";
@@ -187,7 +189,7 @@ void generate(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
   int pos = 0;                  // position in the sequence
   while (pos < steps) {
     // forward the model to get logits for the next token
-    float *logits = forward(mamba, token);
+    T *logits = forward(mamba, token);
 
     // advance the state machine
     if (pos < num_prompt_tokens - 1) {
@@ -265,8 +267,8 @@ void read_stdin(const char *guide, char *buffer, size_t bufsize) {
 // I manually inspected the tokens for a few chat conversations compared to
 // python reference and that seemed ok, but this was not thoroughly tested and
 // is not safely implemented, it's more a proof of concept atm.
-
-void chat(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
+template <typename T>
+void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
           char *cli_user_prompt, char *cli_system_prompt, int steps) {
 
   // buffers for reading the system prompt and user prompt from stdin
@@ -341,7 +343,7 @@ void chat(Mamba *mamba, Tokenizer *tokenizer, Sampler *sampler,
     }
 
     // forward the model to get logits for the next token
-    float *logits = forward(mamba, token);
+    T *logits = forward(mamba, token);
     next = sample(sampler, logits);
     pos++;
 
@@ -447,44 +449,150 @@ int main(int argc, char *argv[]) {
   if (steps < 0)
     steps = 0;
 
-  // load the model using the model.bin file
-  Mamba mamba;
-  load_model(&mamba, model_path);
-
-  // print the config
-  fprintf(stderr,
-          "config: vocab_size=%d (%d), n_layers=%d, dim=%d, d_inner=%d, "
-          "dt_rank=%d, d_state=%d, d_conv=%d, bits=%d\n",
-          mamba.config.vocab_size, mamba.config.rounded_vocab_size,
-          mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
-          mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv,
-          mamba.config.num_bits);
-
-  if (steps == 0)
-    steps = 256; // override to default len if 0
-
-  // build the Tokenizer via the tokenizer .bin file
-  Tokenizer tokenizer;
-  build_tokenizer(&tokenizer, tokenizer_path);
-
-  // build the Sampler
-  Sampler sampler;
-  build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
-
-  // run!
-  if (strcmp(mode, "generate") == 0) {
-    generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
-  } else if (strcmp(mode, "chat") == 0) {
-    chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
-  } else {
-    fprintf(stderr, "unknown mode: %s\n", mode);
-    error_usage();
+  std::ifstream file(model_path, std::ios::binary | std::ios::ate);
+  if (!file) {
+    std::cerr << "Couldn't open file " << model_path << std::endl;
+    std::exit(EXIT_FAILURE);
   }
 
-  // memory and file handles cleanup
-  free_sampler(&sampler);
-  free_tokenizer(&tokenizer);
-  free_model(&mamba);
+  // get the file size
+  Config *config = (Config *)malloc(sizeof(Config));
+  file.seekg(0, std::ios::beg);
+
+  // todo adjust dimensions to account for activation bool tensor
+  // read the config
+  // don't read rounded vocab size; that's computed here
+  if (!file.read(reinterpret_cast<char *>(config), sizeof(Config))) {
+    std::exit(EXIT_FAILURE);
+  }
+
+  if (config->vocab_size % 8 != 0) {
+    config->rounded_vocab_size =
+        config->vocab_size + (8 - (config->vocab_size % 8));
+  } else {
+    config->rounded_vocab_size = config->vocab_size;
+  }
+
+  file.close();
+  // load the model using the model.bin file
+  if (config->num_bits == 32) {
+    Mamba<float> mamba;
+
+    load_model(&mamba, model_path);
+
+    // print the config
+    fprintf(stderr,
+            "config: vocab_size=%d (%d), n_layers=%d, dim=%d, d_inner=%d, "
+            "dt_rank=%d, d_state=%d, d_conv=%d, bits=%d\n",
+            mamba.config.vocab_size, mamba.config.rounded_vocab_size,
+            mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
+            mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv,
+            mamba.config.num_bits);
+
+    if (steps == 0)
+      steps = 256; // override to default len if 0
+
+    // build the Tokenizer via the tokenizer .bin file
+    Tokenizer tokenizer;
+    build_tokenizer(&tokenizer, tokenizer_path);
+
+    // build the Sampler
+    Sampler sampler;
+    build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
+
+    // run!
+    if (strcmp(mode, "generate") == 0) {
+      generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
+    } else if (strcmp(mode, "chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else {
+      fprintf(stderr, "unknown mode: %s\n", mode);
+      error_usage();
+    }
+
+    // memory and file handles cleanup
+    free_sampler(&sampler);
+    free_tokenizer(&tokenizer);
+    free_model(&mamba);
+  } else if (config->num_bits == 16) {
+    Mamba<int16_t> mamba;
+
+    load_model(&mamba, model_path);
+
+    // print the config
+    fprintf(stderr,
+            "config: vocab_size=%d (%d), n_layers=%d, dim=%d, d_inner=%d, "
+            "dt_rank=%d, d_state=%d, d_conv=%d, bits=%d\n",
+            mamba.config.vocab_size, mamba.config.rounded_vocab_size,
+            mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
+            mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv,
+            mamba.config.num_bits);
+
+    if (steps == 0)
+      steps = 256; // override to default len if 0
+
+    // build the Tokenizer via the tokenizer .bin file
+    Tokenizer tokenizer;
+    build_tokenizer(&tokenizer, tokenizer_path);
+
+    // build the Sampler
+    Sampler sampler;
+    build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
+
+    // run!
+    if (strcmp(mode, "generate") == 0) {
+      generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
+    } else if (strcmp(mode, "chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else {
+      fprintf(stderr, "unknown mode: %s\n", mode);
+      error_usage();
+    }
+
+    // memory and file handles cleanup
+    free_sampler(&sampler);
+    free_tokenizer(&tokenizer);
+    free_model(&mamba);
+  } else if (config->num_bits == 8) {
+    Mamba<int8_t> mamba;
+    load_model(&mamba, model_path);
+
+    // print the config
+    fprintf(stderr,
+            "config: vocab_size=%d (%d), n_layers=%d, dim=%d, d_inner=%d, "
+            "dt_rank=%d, d_state=%d, d_conv=%d, bits=%d\n",
+            mamba.config.vocab_size, mamba.config.rounded_vocab_size,
+            mamba.config.n_layers, mamba.config.dim, mamba.config.d_inner,
+            mamba.config.dt_rank, mamba.config.d_state, mamba.config.d_conv,
+            mamba.config.num_bits);
+
+    if (steps == 0)
+      steps = 256; // override to default len if 0
+
+    // build the Tokenizer via the tokenizer .bin file
+    Tokenizer tokenizer;
+    build_tokenizer(&tokenizer, tokenizer_path);
+
+    // build the Sampler
+    Sampler sampler;
+    build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
+
+    // run!
+    if (strcmp(mode, "generate") == 0) {
+      generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
+    } else if (strcmp(mode, "chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else {
+      fprintf(stderr, "unknown mode: %s\n", mode);
+      error_usage();
+    }
+
+    // memory and file handles cleanup
+    free_sampler(&sampler);
+    free_tokenizer(&tokenizer);
+    free_model(&mamba);
+  }
+
   return 0;
 }
 #endif
