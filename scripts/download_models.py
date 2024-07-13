@@ -67,7 +67,7 @@ def model_export(
             "iiiiiiii",
             config.n_layer,
             config.vocab_size,
-            config.hidden_size,
+            config.d_model, #was config.hidden_size
             d_inner,
             dt_rank,
             d_state,

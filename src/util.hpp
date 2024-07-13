@@ -9,6 +9,8 @@
 #include <time.h>
 #include <vector>
 
+#include <boost/dynamic_bitset.hpp>
+
 #include "mamba.hpp"
 
 inline void malloc_run_state(RunState *s, Config *p) {
@@ -148,17 +150,8 @@ inline float* quantized_to_float_tensor(size_t dim, uint8_t num_bits,
     ptr += sizeof(float);
 
     for(int i = 0; i < dim; i++) {
-      // int quantized_value = (*(int*)ptr) & quant_mask;
-      // short quantized_val = 0;
-      // for(int b = 0; b < num_bits; b++) {
-      //   if(pos == 0) {
-      //     ptr++;
-      //     val = *ptr;
-      //   }
-      //   quantized_val |= (val & 1) << b;
-      //   val >>= 1;
-      //   pos = (pos + 1) & 0x7;
-      // }
+      // boost::dynamic_bitset<uint8_t> quantized_val(num_bits);
+      // quantized_val = *(boost::dynamic_bitset<uint8_t>*) ptr;
       int16_t quantized_val = *(int16_t*)ptr;
       ptr += sizeof(int16_t);
       
