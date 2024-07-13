@@ -14,9 +14,10 @@ template <typename T> inline void rmsnorm(T *o, T *x, T *weight, int size) {
   ss /= size;
   ss += 1e-5f;
   ss = 1.0f / sqrtf(ss);
+
   // normalize and scale
   for (int j = 0; j < size; j++) {
-    o[j] = x[j] * weight[j] * ss;
+    o[j] = x[j] * TO_FLOAT_INT16(weight[j]) * ss; //Todo new macro to dequantize
   }
 }
 
