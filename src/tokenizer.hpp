@@ -153,8 +153,9 @@ void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
   // create a temporary buffer that will store merge candidates of always two
   // consecutive tokens *2 for concat, +1 for null terminator +2 for UTF8 (in
   // case max_token_length is 1)
+  size_t buffer_size = (t->max_token_length * 2 + 1 + 2); 
   char *str_buffer =
-      (char *)malloc((t->max_token_length * 2 + 1 + 2) * sizeof(char));
+      (char *)malloc(buffer_size * sizeof(char));
   size_t str_len = 0;
 
   // start at 0 tokens
@@ -231,7 +232,7 @@ void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
 
     for (int i = 0; i < (*n_tokens - 1); i++) {
       // check if we can merge the pair (tokens[i], tokens[i+1])
-      sprintf(str_buffer, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i + 1]]);
+      snprintf(str_buffer, buffer_size, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i + 1]]);
       int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
       if (id != -1) {
         // this merge pair exists in vocab! record its position
