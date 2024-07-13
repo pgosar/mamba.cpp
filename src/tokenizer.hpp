@@ -3,18 +3,22 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <random>
 #include <stdio.h>
 #include <string.h>
 
-#include "math.h"
+#include "math.hpp"
 // ----------------------------------------------------------------------------
 // The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
 
 #define BOS 0
 #define EOS 0
 
+inline std::mt19937 gen(std::random_device{}());
+inline std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+
 typedef struct {
-  char *str;
+  const char *str;
   int id;
 } TokenIndex;
 
@@ -26,11 +30,11 @@ typedef struct {
   unsigned char byte_pieces[512]; // stores all single-byte strings
 } Tokenizer;
 
-int compare_tokens(const void *a, const void *b) {
+inline int compare_tokens(const void *a, const void *b) {
   return strcmp(((TokenIndex *)a)->str, ((TokenIndex *)b)->str);
 }
 
-void build_tokenizer(Tokenizer *t, char *tokenizer_path, int model_vocab_size) {
+inline void build_tokenizer(Tokenizer *t, char *tokenizer_path) {
   // initialize the byte_pieces array
   for (int i = 0; i < 256; i++) {
     t->byte_pieces[i * 2] = (unsigned char)i;
@@ -54,7 +58,7 @@ void build_tokenizer(Tokenizer *t, char *tokenizer_path, int model_vocab_size) {
     exit(EXIT_FAILURE);
   }
   // malloc space for the vocab
-  t->vocab_size = vocab_size; 
+  t->vocab_size = vocab_size;
   t->vocab = (char **)malloc(vocab_size * sizeof(char *));
   if (!t->vocab) {
     fprintf(stderr, "malloc failed\n");
@@ -78,7 +82,7 @@ void build_tokenizer(Tokenizer *t, char *tokenizer_path, int model_vocab_size) {
   fclose(file);
 }
 
-void free_tokenizer(Tokenizer *t) {
+inline void free_tokenizer(Tokenizer *t) {
   for (int i = 0; i < t->vocab_size; i++) {
     free(t->vocab[i]);
   }
@@ -86,7 +90,7 @@ void free_tokenizer(Tokenizer *t) {
   free(t->sorted_vocab);
 }
 
-char *decode(Tokenizer *t, int prev_token, int token) {
+inline char *decode(Tokenizer *t, int prev_token, int token) {
   char *piece = t->vocab[token];
   // discard initial space if prev_token was EOS
   if (prev_token == EOS && piece[0] == ' ') {
@@ -101,7 +105,7 @@ char *decode(Tokenizer *t, int prev_token, int token) {
   return piece;
 }
 
-void safe_printf(char *piece) {
+inline void safe_printf(char *piece) {
   // piece might be a raw byte token, and we only want to print printable chars
   // or whitespace because some of the other bytes can be various control codes,
   // backspace, etc.
@@ -120,17 +124,18 @@ void safe_printf(char *piece) {
   printf("%s", piece);
 }
 
-int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size) {
+inline int str_lookup(const char *str, TokenIndex *sorted_vocab,
+                      int vocab_size) {
   // efficiently find the perfect match for str in vocab, return its index or -1
   // if not found
-  TokenIndex tok = {.str = str}; // acts as the key to search for
+  TokenIndex tok = {.str = str, .id = 0}; // acts as the key to search for
   TokenIndex *res = (TokenIndex *)bsearch(&tok, sorted_vocab, vocab_size,
                                           sizeof(TokenIndex), compare_tokens);
   return res != NULL ? res->id : -1;
 }
 
-void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
-            int *tokens, int *n_tokens) {
+inline void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
+                   int *tokens, int *n_tokens) {
   // encode the string text (input) into an upper-bound preallocated tokens[]
   // array add_bos != 0 means prepend the BOS token, add_eos != 0 means append
   // the EOS token
@@ -153,7 +158,7 @@ void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
   // create a temporary buffer that will store merge candidates of always two
   // consecutive tokens *2 for concat, +1 for null terminator +2 for UTF8 (in
   // case max_token_length is 1)
-  size_t buffer_size = (t->max_token_length * 2 + 1 + 2); 
+  size_t buffer_size = (t->max_token_length * 2 + 1 + 2);
   char *str_buffer =
       (char *)malloc(buffer_size * sizeof(char));
   size_t str_len = 0;
@@ -218,7 +223,7 @@ void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
       // byte_fallback encoding: just encode each byte as a token
       // +3 is here because the first 3 vocab elements are <unk>, <s>, </s>
       // so the individual bytes only start at index 3
-      for (int i = 0; i < str_len; i++) {
+      for (size_t i = 0; i < str_len; i++) {
         tokens[(*n_tokens)++] = (unsigned char)str_buffer[i] + 3;
       }
     }
@@ -232,7 +237,8 @@ void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
 
     for (int i = 0; i < (*n_tokens - 1); i++) {
       // check if we can merge the pair (tokens[i], tokens[i+1])
-      snprintf(str_buffer, buffer_size, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i + 1]]);
+      snprintf(str_buffer, buffer_size, "%s%s", t->vocab[tokens[i]],
+               t->vocab[tokens[i + 1]]);
       int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
       if (id != -1) {
         // this merge pair exists in vocab! record its position
@@ -276,14 +282,13 @@ typedef struct {
   ProbIndex *probindex; // buffer used in top-p sampling
   float temperature;
   float topp;
-  unsigned long long rng_state;
 } Sampler;
 
-int sample_argmax(float *probabilities, int n) {
+template <typename T> inline int sample_argmax(T *probabilities, int n) {
   // return the index that has the highest probability
   int max_i = 0;
   float max_p = probabilities[0];
-  
+
   for (int i = 1; i < n; i++) {
     if (probabilities[i] > max_p) {
       max_i = i;
@@ -293,7 +298,8 @@ int sample_argmax(float *probabilities, int n) {
   return max_i;
 }
 
-int sample_mult(float *probabilities, int n, float coin) {
+template <typename T>
+inline int sample_mult(T *probabilities, int n, float coin) {
   // sample index from probabilities (they must sum to 1!)
   // coin is a random number in [0, 1), usually from random_f32()
   float cdf = 0.0f;
@@ -306,7 +312,7 @@ int sample_mult(float *probabilities, int n, float coin) {
   return n - 1; // in case of rounding errors
 }
 
-int compare(const void *a, const void *b) {
+inline int compare(const void *a, const void *b) {
   ProbIndex *a_ = (ProbIndex *)a;
   ProbIndex *b_ = (ProbIndex *)b;
   if (a_->prob > b_->prob)
@@ -316,8 +322,9 @@ int compare(const void *a, const void *b) {
   return 0;
 }
 
-int sample_topp(float *probabilities, int n, float topp, ProbIndex *probindex,
-                float coin) {
+template <typename T>
+inline int sample_topp(T *probabilities, int n, float topp,
+                       ProbIndex *probindex, float coin) {
   // top-p sampling (or "nucleus sampling") samples from the smallest set of
   // tokens that exceed probability topp. This way we never sample tokens that
   // have very low probabilities and are less likely to go "off the rails".
@@ -360,31 +367,23 @@ int sample_topp(float *probabilities, int n, float topp, ProbIndex *probindex,
   return probindex[last_idx].index; // in case of rounding errors
 }
 
-void build_sampler(Sampler *sampler, int vocab_size, float temperature,
-                   float topp, unsigned long long rng_seed) {
+inline void build_sampler(Sampler *sampler, int vocab_size, float temperature,
+                          float topp) {
   sampler->vocab_size = vocab_size;
   sampler->temperature = temperature;
   sampler->topp = topp;
-  sampler->rng_state = rng_seed;
   // buffer only used with nucleus sampling; may not need but it's ~small
   sampler->probindex =
       (ProbIndex *)malloc(sampler->vocab_size * sizeof(ProbIndex));
 }
 
-void free_sampler(Sampler *sampler) { free(sampler->probindex); }
+inline void free_sampler(Sampler *sampler) { free(sampler->probindex); }
 
-unsigned int random_u32(unsigned long long *state) {
-  // xorshift rng: https://en.wikipedia.org/wiki/Xorshift#xorshift.2A
-  *state ^= *state >> 12;
-  *state ^= *state << 25;
-  *state ^= *state >> 27;
-  return (*state * 0x2545F4914F6CDD1Dull) >> 32;
-}
-float random_f32(unsigned long long *state) { // random float32 in [0,1)
-  return (random_u32(state) >> 8) / 16777216.0f;
-}
+inline unsigned int random_u32() { return gen(); }
 
-int sample(Sampler *sampler, float *logits) {
+inline float random_f32() { return dis(gen); }
+
+template <typename T> inline int sample(Sampler *sampler, T *logits) {
   // sample the token given the logits and some hyperparameters
   int next;
 
@@ -399,7 +398,7 @@ int sample(Sampler *sampler, float *logits) {
     // apply softmax to the logits to get the probabilities for next token
     softmax(logits, sampler->vocab_size);
     // flip a (float) coin (this is our source of entropy for sampling)
-    float coin = random_f32(&sampler->rng_state);
+    float coin = random_f32();
     // we sample from this distribution to get the next token
     if (sampler->topp <= 0 || sampler->topp >= 1) {
       // simply sample from the predicted probability distribution

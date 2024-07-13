@@ -1,8 +1,11 @@
+#ifndef MATH_HPP
+#define MATH_HPP
+
 #include <math.h>
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
 
-inline void rmsnorm(float *o, float *x, float *weight, int size) {
+template <typename T> inline void rmsnorm(T *o, T *x, T *weight, int size) {
   // calculate sum of squares
   float ss = 0.0f;
   for (int j = 0; j < size; j++) {
@@ -11,13 +14,14 @@ inline void rmsnorm(float *o, float *x, float *weight, int size) {
   ss /= size;
   ss += 1e-5f;
   ss = 1.0f / sqrtf(ss);
+
   // normalize and scale
   for (int j = 0; j < size; j++) {
-    o[j] = x[j] * weight[j] * ss;
+    o[j] = x[j] * TO_FLOAT_INT16(weight[j]) * ss; //Todo new macro to dequantize
   }
 }
 
-inline void softmax(float *x, int size) {
+template <typename T> inline void softmax(T *x, int size) {
   // find max value (for numerical stability)
   float max_val = x[0];
   for (int i = 1; i < size; i++) {
@@ -37,13 +41,14 @@ inline void softmax(float *x, int size) {
   }
 }
 
-inline float softplus(float x) { return logf(1.0f + expf(x)); }
+template <typename T> inline T softplus(T x) { return logf(1.0f + expf(x)); }
 
-inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+template <typename T> inline T sigmoid(T x) { return 1.0f / (1.0f + expf(-x)); }
 
-inline float silu(float x) { return x * sigmoid(x); }
+template <typename T> inline T silu(T x) { return x * sigmoid(x); }
 
-inline void shift_matrix_left(float *matrix, int rows, int cols) {
+template <typename T>
+inline void shift_matrix_left(T *matrix, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols - 1; j++) {
@@ -52,15 +57,17 @@ inline void shift_matrix_left(float *matrix, int rows, int cols) {
   }
 }
 
-inline void update_last_column(float *matrix, float *x, int rows, int cols) {
+template <typename T>
+inline void update_last_column(T *matrix, T *x, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     matrix[i * cols + cols - 1] = x[i];
   }
 }
 
-inline void rowwise_dot_product(float *out, float *matrix, float *weights,
-                                int rows, int cols) {
+template <typename T>
+inline void rowwise_dot_product(T *out, T *matrix, T *weights, int rows,
+                                int cols) {
 // matrix[rows,cols], weights[cols] -> out[rows]
 // this is a dot product of each row of the matrix with the weights
 // i.e. out[i] = matrix[i,:] @ weights
@@ -74,7 +81,7 @@ inline void rowwise_dot_product(float *out, float *matrix, float *weights,
   }
 }
 
-inline void matmul(float *xout, float *x, float *w, int d, int n) {
+template <typename T> inline void matmul(T *xout, T *x, T *w, int d, int n) {
 // w[d,n] @ x[n] -> xout[d]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -86,7 +93,8 @@ inline void matmul(float *xout, float *x, float *w, int d, int n) {
   }
 }
 
-inline void linear(float *xout, float *x, float *w, float *b, int d, int n) {
+template <typename T>
+inline void linear(T *xout, T *x, T *w, T *b, int d, int n) {
 // w[d,n] @ x[n] + b[d] -> xout[d]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -98,7 +106,8 @@ inline void linear(float *xout, float *x, float *w, float *b, int d, int n) {
   }
 }
 
-inline void broadcast_multiply(float *out, float *x, float *y, int d, int n) {
+template <typename T>
+inline void broadcast_multiply(T *out, T *x, T *y, int d, int n) {
 // x[d], y[d,n] -> out[d,n]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -110,31 +119,35 @@ inline void broadcast_multiply(float *out, float *x, float *y, int d, int n) {
   }
 }
 
-inline void elementwise_multiply(float *result, float *matrix1, float *matrix2,
-                          int total_elements) {
+template <typename T>
+inline void elementwise_multiply(T *result, T *matrix1, T *matrix2,
+                                 int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] * matrix2[i];
   }
 }
 
-inline void elementwise_add(float *result, float *matrix1, float *matrix2,
-                     int total_elements) {
+template <typename T>
+inline void elementwise_add(T *result, T *matrix1, T *matrix2,
+                            int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] + matrix2[i];
   }
 }
 
-inline void elementwise_multiply_and_add(float *result, float *matrix1, float *matrix2,
-                                  float *matrix3, int total_elements) {
+template <typename T>
+inline void elementwise_multiply_and_add(T *result, T *matrix1, T *matrix2,
+                                         T *matrix3, int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
 }
 
-inline void outer_product(float *out, float *x, float *y, int d, int n) {
+template <typename T>
+inline void outer_product(T *out, T *x, T *y, int d, int n) {
 // x[d], y[n] -> out[d,n]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -143,8 +156,8 @@ inline void outer_product(float *out, float *x, float *y, int d, int n) {
     }
   }
 }
-
-inline void sum_along_last_dim(float *result, float *matrix, int rows, int cols) {
+template <typename T>
+inline void sum_along_last_dim(T *result, T *matrix, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     float val = 0.0f;
@@ -154,3 +167,5 @@ inline void sum_along_last_dim(float *result, float *matrix, int rows, int cols)
     result[i] = val;
   }
 }
+
+#endif // MATH_HPP

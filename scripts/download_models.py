@@ -9,23 +9,24 @@ import torch
 from torch import Tensor
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer
 
+
 def quantize_tensor(tensor: Tensor, num_bits: int) -> tuple[Tensor, float, float]:
     x_range: float = float(torch.max(tensor) - torch.min(tensor))
     x_range = 1 if x_range == 0 else x_range
     num: int = 2 ** (num_bits - 1)
-    scale: float = (2*num) / x_range
+    scale: float = (2 * num) / x_range
     zeropoint: float = float((-scale * torch.min(tensor) - num).round())
     x_quant: Tensor = torch.clip(
         (tensor * scale + zeropoint).round(),
         -num,
         num - 1,
     )
-    
-    return x_quant.to(torch.int16), scale, zeropoint #hardcoded for now; fix this
+
+    return x_quant.to(torch.int16), scale, zeropoint  # hardcoded for now; fix this
 
 
 def preprocess(
-    tensor: Tensor, activations: Tensor
+    tensor: torch.Tensor, activations: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     sparsity_threshold: float = 1e-3
     activation_threshold = 0.5
@@ -33,24 +34,28 @@ def preprocess(
     tensor = torch.where(
         tensor.abs() < sparsity_threshold, torch.zeros_like(tensor), tensor
     )
-    is_activated: Tensor = (activations.abs() > activation_threshold).to(torch.bool)
+    is_activated: torch.Tensor = (activations.abs() > activation_threshold).to(
+        torch.bool
+    )
     return tensor, is_activated
 
 
 def serialize_fp32(
-    file: BinaryIO, tensor: Tensor, is_activated: Tensor, num_bits: int
+    file: BinaryIO, tensor: torch.Tensor, is_activated: torch.Tensor, num_bits: int
 ) -> None:
     if num_bits < 32:
         tensor, scale, zeropoint = quantize_tensor(tensor, num_bits)
-    #d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
-    d: Tensor = tensor.detach().cpu().view(-1) #temp
-    #d, is_activated = preprocess(d, is_activated)
+    # d: Tensor = tensor.detach().cpu().view(-1).to(torch.uint8)
+    d: Tensor = tensor.detach().cpu().view(-1)  # temp
+    # d, is_activated = preprocess(d, is_activated)
     if num_bits < 32:
         # need to specify endianess here
         b: bytes = struct.pack(f"<ff{len(d)}h", scale, zeropoint, *d.numpy())
-    else: 
-        b: bytes = struct.pack(f"{len(d)}f", *d.numpy())#, is_activated.numpy()) #TODO reintroduce
-    #TODO pack bools from is_activated more tightly 
+    else:
+        b: bytes = struct.pack(
+            f"{len(d)}f", *d.numpy()
+        )  # , is_activated.numpy()) #TODO reintroduce
+    # TODO pack bools from is_activated more tightly
     _ = file.write(b)
 
 
@@ -72,7 +77,7 @@ def model_export(
             dt_rank,
             d_state,
             d_conv,
-            num_bits
+            num_bits,
         )
         _ = f.write(header)
 
@@ -138,10 +143,10 @@ def tokenizer_export(model: str, path: str) -> None:
     print("exporting tokenizer...")
     tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(
         "state-spaces/mamba-" + model + "-hf"
-    ) # type: ignore
+    )  # type: ignore
     tokens: list[bytes] = []
     for i in range(50277):
-        t: str = tokenizer.decode([i]) # type: ignore
+        t: str = tokenizer.decode([i])  # type: ignore
         b: bytes = t.encode("utf-8")
         tokens.append(b)
 
@@ -153,20 +158,24 @@ def tokenizer_export(model: str, path: str) -> None:
             _ = f.write(struct.pack("i", len(token_bytes)))
             _ = f.write(token_bytes)
 
+
 def load_config(model_name: str):
     from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
     from transformers.utils.hub import cached_file
 
-    config_path = cached_file("state-spaces/mamba-" + model_name + "-hf", 
-                              CONFIG_NAME, 
-                              _raise_exceptions_for_missing_entries=False)
-   
-    with open(config_path) as f: # type: ignore
+    config_path = cached_file(
+        "state-spaces/mamba-" + model_name + "-hf",
+        CONFIG_NAME,
+        _raise_exceptions_for_missing_entries=False,
+    )
+
+    with open(config_path) as f:  # type: ignore
         config = json.load(f)
-    
+
     config = Namespace(**config)
     print(vars(config))
     return vars(config)
+
 
 def main() -> None:
     makedirs("models", exist_ok=True)
@@ -209,12 +218,13 @@ def main() -> None:
     )
     args: Namespace = parser.parse_args()
 
-    model: MambaForCausalLM = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf") # type: ignore
+    model: MambaForCausalLM = MambaForCausalLM.from_pretrained("state-spaces/mamba-" + args.model + "-hf")  # type: ignore
 
     config: MambaConfig = MambaConfig.from_pretrained(
         "state-spaces/mamba-" + args.model
-    ) # type: ignore
+    )  # type: ignore
     model_export(model, config, args.model_dir, args.bits)
+    print("model exported to ", args.model)
     tokenizer_export(args.tokenizer, args.tokenizer_dir)
 
 
