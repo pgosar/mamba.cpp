@@ -182,8 +182,7 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
   std::vector<int> prev_tokens;
 
   // start the main loop
-  long start =
-      0;    // used to time our code, only initialized after first iteration
+  long start = 0;    // used to time our code, only initialized after first iteration
   int next; // will store the next token in the sequence
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;                  // position in the sequence
