@@ -133,7 +133,7 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {
     // normalize the input
-    rmsnorm(hidden_state, input, w->norm + l * dim, dim);
+    rmsnorm(hidden_state, input, w->norm+l*dim, dim);
     // forward this layer
     forward_layer(mamba, l, hidden_state);
     // residual connection back into hidden_state

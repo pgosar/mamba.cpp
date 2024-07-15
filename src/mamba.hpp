@@ -4,6 +4,7 @@
 #define MAMBA_HPP
 
 #include <unistd.h>
+#include "math.hpp"
 
 // For int8_t
 #define TO_FLOAT_INT8(x) ((float)(x) / 255.0e7f)

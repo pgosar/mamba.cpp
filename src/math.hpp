@@ -2,6 +2,77 @@
 #define MATH_HPP
 
 #include <math.h>
+
+// tensors
+template <typename T>
+concept Number = std::integral<T> || std::floating_point<T>;
+
+template <Number T>
+class Tensor {
+private:
+  const float _scale;      //for dequantization
+  const float _zeropoint;  //^
+  T* _data;
+
+public:
+  Tensor(float scale, float zeropoint, T* data) : 
+    _scale(scale), _zeropoint(zeropoint), _data(data)
+  {}
+
+  ~Tensor() {
+    delete _data;
+  }
+
+  //TODO maybe go down to int? 
+  //will we even have tensors with such high dim anyways?
+  template<typename D=T,
+  std::enable_if_t<!std::is_same<D,float>::value>>
+  inline float dequantize(size_t i) const {
+    return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
+  }
+
+    template<typename D=T,
+  std::enable_if_t<std::is_same<D,float>::value>>
+  inline float dequantize(size_t i) const {
+    return _data[i];
+  }
+
+  const T* data() const {
+    return const_cast<T*>(data);
+  }
+};
+
+/*
+* A Tensor that stores its length and provides tensor-wide operations
+* Very slightly higher memory footprint than base Tensor 
+* (24 vs 16 bytes, usually negligible)
+*
+* TODO parallel implementation
+*/
+template <Number T>
+class EnhancedTensor : Tensor<T> {
+private:
+  const size_t _len;
+
+public:
+  EnhancedTensor(float scale, float zeropoint, T* data, size_t len) :
+    Tensor<T>(scale, zeropoint, data), _len(len)
+  {}
+
+  EnhancedTensor<float> dequantize() {
+    //risky but far more efficient than copying here
+    if(std::is_same<T, float>::value) return this; 
+
+    float* dequantized = (float*) malloc(_len * sizeof(float));
+    for(size_t i = 0; i < _len; i++) {
+      dequantized[i] = (this->_data[i] - this->_zeropoint) / this->_scale;
+    }
+
+    EnhancedTensor<float> ret(1, 0, dequantized, _len);
+    return ret;
+  }
+};
+
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
 
@@ -17,7 +88,7 @@ template <typename T> inline void rmsnorm(T *o, T *x, T *weight, int size) {
 
   // normalize and scale
   for (int j = 0; j < size; j++) {
-    o[j] = x[j] * TO_FLOAT_INT16(weight[j]) * ss; //Todo new macro to dequantize
+    o[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
   }
 }
 
