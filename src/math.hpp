@@ -2,6 +2,7 @@
 #define MATH_HPP
 
 #include <math.h>
+#include <cfloat>
 
 // tensors
 template <typename T>
@@ -9,9 +10,9 @@ concept Number = std::integral<T> || std::floating_point<T>;
 
 template <Number T>
 class Tensor {
-private:
-  const float _scale;      //for dequantization
-  const float _zeropoint;  //^
+protected:
+  float _scale;      //for dequantization
+  float _zeropoint;  //^
   T* _data;
 
 public:
@@ -31,10 +32,22 @@ public:
     return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
   }
 
-    template<typename D=T,
+  template<typename D=T,
   std::enable_if_t<std::is_same<D,float>::value>>
   inline float dequantize(size_t i) const {
     return _data[i];
+  }
+
+  template<typename D=T,
+  std::enable_if_t<!std::is_same<D,float>::value>>
+  inline T quantize(size_t i, float value) const {
+    _data[i] = static_cast<T>(((value * _scale) + _zeropoint) + .5 * signbit(value));
+  }
+
+  template<typename D=T,
+  std::enable_if_t<std::is_same<D,float>::value>>
+  inline T quantize(size_t i, float value) const {
+    _data[i] = value;
   }
 
   const T* data() const {
@@ -60,8 +73,8 @@ public:
   {}
 
   EnhancedTensor<float> dequantize() {
-    //risky but far more efficient than copying here
-    if(std::is_same<T, float>::value) return this; 
+    //todo use templates
+    if(std::is_same<T, float>::value) return this;
 
     float* dequantized = (float*) malloc(_len * sizeof(float));
     for(size_t i = 0; i < _len; i++) {
@@ -70,6 +83,32 @@ public:
 
     EnhancedTensor<float> ret(1, 0, dequantized, _len);
     return ret;
+  }
+
+  void requantize(EnhancedTensor<float>& t) {
+    if(std::is_same<T, float>::value) return; 
+
+    float max = FLT_MAX;
+    float min = -FLT_MAX;
+    for(int i = 0; i < _len; i++) {
+      if(this->_data[i] > max) max = this->_data[i];
+      if(this->_data[i] < min) min = this->_data[i];
+    }
+
+    float x_range = max - min;
+    x_range = x_range == 0 ? 1 : x_range;
+
+    constexpr T T_MAX = 1 << (sizeof(T)-1); 
+
+    this->_scale = (2.0 * T_MAX) / x_range;
+    this->_zeropoint = std::round(-this->_scale * min - T_MAX);
+
+    for(int i = 0; i < _len; i++) {
+      float converted = t._data[i] * this->_scale + this->_zeropoint;
+      if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
+      else if (converted < -T_MAX) this->_data[i] = -T_MAX;
+      else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+    }
   }
 };
 
