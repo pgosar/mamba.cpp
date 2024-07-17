@@ -127,7 +127,7 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   T *hidden_state = s->hidden_state;
 
   // copy the token embedding into x
-  T *content_row = w->token_embedding_table + token * dim;
+  const T *content_row = w->token_embedding_table + token * dim;
   memcpy(input, content_row, dim * sizeof(T));
 
   // forward all the layers

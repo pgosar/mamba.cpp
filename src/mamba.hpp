@@ -63,6 +63,7 @@ typedef struct {
   int d_state;
   int d_conv;
   int num_bits;
+  long long longest_tensor_len; // length of the longest weights tensor, flattened
   int rounded_vocab_size; // vocab_size rounded up to the nearest multiple of 8
 } Config;
 
@@ -71,22 +72,24 @@ typedef struct {
                             // low repetition
 } UserConfig;
 
+//readonly
 template <typename T> struct MambaWeights {
-  T *token_embedding_table; // (rounded_vocab_size, dim)
-  T *in_proj;               // (layer, 2*d_inner, dim)
-  T *conv1d_weight;         // (layer, d_inner, 1, d_conv)
-  T *conv1d_bias;           // (layer, d_inner)
-  T *x_proj;                // (layer, dt_rank+2*d_state, d_inner)
-  T *dt_proj_weight;        // (layer, d_inner, dt_rank)
-  T *dt_proj_bias;          // (layer, d_inner)
-  T *A;                     // (layer, d_inner, d_state)
-  T *D;                     // (layer, d_inner)
-  T *out_proj;              // (layer, dim, d_inner)
-  T *norm;                  // (layer, dim)
-  T *final_norm;            // (dim)
-  T *lm_head;               // (rounded_vocab_size, dim)
+  const T *token_embedding_table; // (rounded_vocab_size, dim)              
+  const T *in_proj;               // (layer, 2*d_inner, dim)                
+  const T *conv1d_weight;         // (layer, d_inner, 1, d_conv)
+  const T *conv1d_bias;           // (layer, d_inner)
+  const T *x_proj;                // (layer, dt_rank+2*d_state, d_inner)
+  const T *dt_proj_weight;        // (layer, d_inner, dt_rank)
+  const T *dt_proj_bias;          // (layer, d_inner)
+  const T *A;                     // (layer, d_inner, d_state)
+  const T *D;                     // (layer, d_inner)
+  const T *out_proj;              // (layer, dim, d_inner)
+  const T *norm;                  // (layer, dim)
+  const T *final_norm;            // (dim)
+  const T *lm_head;               // (rounded_vocab_size, dim)
 };
 
+//read and written to
 template <typename T> struct RunState {
   // memory reused by all layers
   T *input;        // (dim)
@@ -102,6 +105,7 @@ template <typename T> struct RunState {
   // internal state, separate memory for each layer
   T *conv_state; // (n_layers, d_inner, d_conv)
   T *ssm_state;  // (n_layers, d_inner, d_state)
+  float *dequantized_buffer;
 };
 
 template <typename T> struct Mamba {

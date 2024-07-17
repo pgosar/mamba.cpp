@@ -115,7 +115,7 @@ public:
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
 
-template <typename T> inline void rmsnorm(T *o, T *x, T *weight, int size) {
+template <typename T> inline void rmsnorm(T *o, const T *x, const T *weight, int size) {
   // calculate sum of squares
   float ss = 0.0f;
   for (int j = 0; j < size; j++) {
@@ -168,7 +168,7 @@ inline void shift_matrix_left(T *matrix, int rows, int cols) {
 }
 
 template <typename T>
-inline void update_last_column(T *matrix, T *x, int rows, int cols) {
+inline void update_last_column(T *matrix, const T *x, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     matrix[i * cols + cols - 1] = x[i];
@@ -176,7 +176,7 @@ inline void update_last_column(T *matrix, T *x, int rows, int cols) {
 }
 
 template <typename T>
-inline void rowwise_dot_product(T *out, T *matrix, T *weights, int rows,
+inline void rowwise_dot_product(T *out, const T *matrix, const T *weights, int rows,
                                 int cols) {
 // matrix[rows,cols], weights[cols] -> out[rows]
 // this is a dot product of each row of the matrix with the weights
@@ -191,7 +191,8 @@ inline void rowwise_dot_product(T *out, T *matrix, T *weights, int rows,
   }
 }
 
-template <typename T> inline void matmul(T *xout, T *x, T *w, int d, int n) {
+//TODO optimize
+template <typename T> inline void matmul(T *xout, const T *x, const T *w, int d, int n) {
 // w[d,n] @ x[n] -> xout[d]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -204,7 +205,7 @@ template <typename T> inline void matmul(T *xout, T *x, T *w, int d, int n) {
 }
 
 template <typename T>
-inline void linear(T *xout, T *x, T *w, T *b, int d, int n) {
+inline void linear(T *xout, const T *x, const T *w, const T *b, int d, int n) {
 // w[d,n] @ x[n] + b[d] -> xout[d]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -217,7 +218,7 @@ inline void linear(T *xout, T *x, T *w, T *b, int d, int n) {
 }
 
 template <typename T>
-inline void broadcast_multiply(T *out, T *x, T *y, int d, int n) {
+inline void broadcast_multiply(T *out, const T *x, const T *y, int d, int n) {
 // x[d], y[d,n] -> out[d,n]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -230,7 +231,7 @@ inline void broadcast_multiply(T *out, T *x, T *y, int d, int n) {
 }
 
 template <typename T>
-inline void elementwise_multiply(T *result, T *matrix1, T *matrix2,
+inline void elementwise_multiply(T *result, const T *matrix1, const T *matrix2,
                                  int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
@@ -239,7 +240,7 @@ inline void elementwise_multiply(T *result, T *matrix1, T *matrix2,
 }
 
 template <typename T>
-inline void elementwise_add(T *result, T *matrix1, T *matrix2,
+inline void elementwise_add(T *result, const T *matrix1, const T *matrix2,
                             int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
@@ -248,8 +249,8 @@ inline void elementwise_add(T *result, T *matrix1, T *matrix2,
 }
 
 template <typename T>
-inline void elementwise_multiply_and_add(T *result, T *matrix1, T *matrix2,
-                                         T *matrix3, int total_elements) {
+inline void elementwise_multiply_and_add(T *result, const T *matrix1, const T *matrix2,
+                                         const T *matrix3, int total_elements) {
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     result[i] = matrix1[i] * matrix2[i] + matrix3[i];
@@ -257,7 +258,7 @@ inline void elementwise_multiply_and_add(T *result, T *matrix1, T *matrix2,
 }
 
 template <typename T>
-inline void outer_product(T *out, T *x, T *y, int d, int n) {
+inline void outer_product(T *out, const T *x, const T *y, int d, int n) {
 // x[d], y[n] -> out[d,n]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
@@ -267,7 +268,7 @@ inline void outer_product(T *out, T *x, T *y, int d, int n) {
   }
 }
 template <typename T>
-inline void sum_along_last_dim(T *result, T *matrix, int rows, int cols) {
+inline void sum_along_last_dim(T *result, const T *matrix, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     float val = 0.0f;

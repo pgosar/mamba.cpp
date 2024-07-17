@@ -123,21 +123,10 @@ inline T *quantized_to_float_tensor(size_t dim, uint8_t num_bits,
     ptr += sizeof(float);
 
     for (size_t i = 0; i < dim; i++) {
-      // int quantized_value = (*(int*)ptr) & quant_mask;
-      // short quantized_val = 0;
-      // for(int b = 0; b < num_bits; b++) {
-      //   if(pos == 0) {
-      //     ptr++;
-      //     val = *ptr;
-      //   }
-      //   quantized_val |= (val & 1) << b;
-      //   val >>= 1;
-      //   pos = (pos + 1) & 0x7;
-      // }
-      int16_t quantized_val = *(int16_t *)ptr;
-      ptr += sizeof(int16_t);
+      T quantized_val = *(T *)ptr;
+      ptr += sizeof(T);
 
-      layer[i] = (quantized_val - zeropoint) / scale;
+      layer[i] = quantized_val; //(quantized_val - zeropoint) / scale;
     }
   }
 
