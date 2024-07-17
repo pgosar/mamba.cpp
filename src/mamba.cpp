@@ -157,14 +157,10 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
 
 template <typename T>
 void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
-              char *prompt, int steps, UserConfig userConfig) {
-  if (prompt == NULL) {
-    prompt = "";
-  }
-
+              std::string prompt, int steps, UserConfig userConfig) {
   // encode the (string) prompt into tokens sequence
   int num_prompt_tokens = 0;
-  int *prompt_tokens = (int *)malloc((strlen(prompt) + 3) *
+  int *prompt_tokens = (int *)malloc((prompt.length() + 3) *
                                      sizeof(int)); // +3 for '\0', BOS, EOS
   encode(tokenizer, prompt, 0, 0, prompt_tokens, &num_prompt_tokens);
   if (num_prompt_tokens < 1) {
@@ -268,7 +264,7 @@ void read_stdin(const char *guide, char *buffer, size_t bufsize) {
 // is not safely implemented, it's more a proof of concept atm.
 template <typename T>
 void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
-          char *cli_user_prompt, char *cli_system_prompt, int steps) {
+          const char *cli_user_prompt, char *cli_system_prompt, int steps) {
 
   // buffers for reading the system prompt and user prompt from stdin
   // you'll notice they are soomewhat haphazardly and unsafely set atm
@@ -385,14 +381,14 @@ int main(int argc, char *argv[]) {
 
   // default parameters
   char *model_path = NULL; // e.g. out/model.bin
-  char *tokenizer_path = "models/tokenizer.bin";
+  std::string tokenizer_path = "models/tokenizer.bin";
   float temperature =
       1.0f; // 0.0 = greedy deterministic. 1.0 = original. don't set higher
   float topp =
       0.9f; // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
   int steps = 256;         // number of steps to run for
-  char *prompt = NULL;     // prompt string
-  char *mode = "generate"; // generate|chat
+  std::string prompt = "";     // prompt string
+  std::string mode = "generate"; // generate|chat
   char *system_prompt =
       NULL; // the (optional) system prompt to use in chat mode
 
@@ -500,12 +496,12 @@ int main(int argc, char *argv[]) {
     build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
 
     // run!
-    if (strcmp(mode, "generate") == 0) {
+    if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
-    } else if (strcmp(mode, "chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else if (mode.compare("chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
     } else {
-      fprintf(stderr, "unknown mode: %s\n", mode);
+      fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
     }
 
@@ -539,12 +535,12 @@ int main(int argc, char *argv[]) {
     build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
 
     // run!
-    if (strcmp(mode, "generate") == 0) {
+    if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
-    } else if (strcmp(mode, "chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else if (mode.compare("chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
     } else {
-      fprintf(stderr, "unknown mode: %s\n", mode);
+      fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
     }
 
@@ -577,10 +573,10 @@ int main(int argc, char *argv[]) {
     build_sampler(&sampler, mamba.config.vocab_size, temperature, topp);
 
     // run!
-    if (strcmp(mode, "generate") == 0) {
+    if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
-    } else if (strcmp(mode, "chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else if (mode.compare("chat") == 0) {
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
     } else {
       fprintf(stderr, "unknown mode: %s\n", mode);
       error_usage();

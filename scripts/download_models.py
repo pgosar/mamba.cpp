@@ -71,7 +71,7 @@ def model_export(
         d_state: int = model_dict["backbone.layers.0.mixer.A_log"].shape[1]
         d_conv: int = model_dict["backbone.layers.0.mixer.conv1d.weight"].shape[2]
         header: bytes = struct.pack(
-            "iiiiiiiiQ",
+            "iiiiiiii",
             config.n_layer,
             config.vocab_size,
             config.d_model, # was config.hidden_size
@@ -79,8 +79,7 @@ def model_export(
             dt_rank,
             d_state,
             d_conv,
-            num_bits,
-            0 # placeholder for longest tensor length
+            num_bits
         )
         _ = f.write(header)
 
@@ -128,13 +127,10 @@ def model_export(
             "backbone.layers.%d.norm.weight",
         ]
 
-        longest_tensor_len = 0
-
         for layer in layer_weights:
             print(f"writing {layer}")
             for n in range(config.n_layer):
                 serialize_fp32(f, model_dict[layer % n], activations[layer], num_bits)
-                longest_tensor_len = max(model_dict[layer % n].numel(), longest_tensor_len)
 
         serialize_fp32(
             f,
@@ -142,10 +138,6 @@ def model_export(
             activations["backbone.norm_f.weight"],
             num_bits,
         )
-
-        f.seek(struct.calcsize("iiiiiiii"))
-        updated_header_data = struct.pack("Q", longest_tensor_len)
-        f.write(updated_header_data)
 
     print("model written to", path)
 

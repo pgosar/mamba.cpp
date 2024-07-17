@@ -20,34 +20,48 @@ public:
     _scale(scale), _zeropoint(zeropoint), _data(data)
   {}
 
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  Tensor(T* data) :
+    _scale(0.0f), _zeropoint(0.0f), _data(data)
+  {}
+
+  Tensor() :
+    _scale(0.0f), _zeropoint(0.0f), _data(NULL)
+  {}
+
   ~Tensor() {
     delete _data;
   }
 
   //TODO maybe go down to int? 
   //will we even have tensors with such high dim anyways?
-  template<typename D=T,
-  std::enable_if_t<!std::is_same<D,float>::value>>
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
   inline float dequantize(size_t i) const {
     return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
   }
 
-  template<typename D=T,
-  std::enable_if_t<std::is_same<D,float>::value>>
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
   inline float dequantize(size_t i) const {
     return _data[i];
   }
 
-  template<typename D=T,
-  std::enable_if_t<!std::is_same<D,float>::value>>
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
   inline T quantize(size_t i, float value) const {
     _data[i] = static_cast<T>(((value * _scale) + _zeropoint) + .5 * signbit(value));
   }
 
-  template<typename D=T,
-  std::enable_if_t<std::is_same<D,float>::value>>
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
   inline T quantize(size_t i, float value) const {
     _data[i] = value;
+  }
+
+  float operator[](size_t i) const {
+    return dequantize(i);
   }
 
   const T* data() const {
@@ -109,6 +123,74 @@ public:
       else if (converted < -T_MAX) this->_data[i] = -T_MAX;
       else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
     }
+  }
+};
+
+template <Number T>
+class Tensor2D {
+private:
+  float* _scales;
+  float* _zeropoints;
+  size_t _layer_len;
+  T* _data;
+
+public:
+  Tensor2D(float* scales, float* zeropoints, size_t layer_len, T* data) :
+    _scales(scales), _zeropoints(zeropoints), _layer_len(layer_len), _data(data)
+  {}
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  Tensor2D(T* data) :
+    _scales(NULL), _zeropoints(NULL), _layer_len(0), _data(data)
+  {}
+
+  Tensor2D() :
+    _scales(NULL), _zeropoints(NULL), _layer_len(0), _data(NULL)
+  {}
+
+  ~Tensor2D() {
+    delete _data;
+    delete _scales;
+    delete _zeropoints;
+  }
+
+  //TODO maybe go down to int? 
+  //will we even have tensors with such high dim anyways?
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
+  inline float dequantize(size_t i) const {
+    float scale = _scales[i / _layer_len];
+    float zeropoint = _zeropoints[i / _layer_len];
+    return (static_cast<float>(_data[i]) - zeropoint) / scale;
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  inline float dequantize(size_t i) const {
+    return _data[i];
+  }
+
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
+  inline T quantize(size_t i, float value) const {
+    float scale = _scales[i / _layer_len];
+    float zeropoint = _zeropoints[i / _layer_len];
+    _data[i] = static_cast<T>(((value * scale) + zeropoint) + .5 * signbit(value));
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  inline T quantize(size_t i, float value) const {
+    _data[i] = value;
+  }
+
+  float operator[](size_t i) const {
+    return dequantize(i);
+  }
+
+  const T* data() const {
+    return const_cast<T*>(data);
   }
 };
 

@@ -74,19 +74,19 @@ typedef struct {
 
 //readonly
 template <typename T> struct MambaWeights {
-  const T *token_embedding_table; // (rounded_vocab_size, dim)              
-  const T *in_proj;               // (layer, 2*d_inner, dim)                
-  const T *conv1d_weight;         // (layer, d_inner, 1, d_conv)
-  const T *conv1d_bias;           // (layer, d_inner)
-  const T *x_proj;                // (layer, dt_rank+2*d_state, d_inner)
-  const T *dt_proj_weight;        // (layer, d_inner, dt_rank)
-  const T *dt_proj_bias;          // (layer, d_inner)
-  const T *A;                     // (layer, d_inner, d_state)
-  const T *D;                     // (layer, d_inner)
-  const T *out_proj;              // (layer, dim, d_inner)
-  const T *norm;                  // (layer, dim)
-  const T *final_norm;            // (dim)
-  const T *lm_head;               // (rounded_vocab_size, dim)
+  const Tensor<T> token_embedding_table; // (rounded_vocab_size, dim)              
+  const Tensor2D<T> in_proj;               // (layer, 2*d_inner, dim)                
+  const Tensor2D<T> conv1d_weight;         // (layer, d_inner, 1, d_conv)
+  const Tensor2D<T> conv1d_bias;           // (layer, d_inner)
+  const Tensor2D<T> x_proj;                // (layer, dt_rank+2*d_state, d_inner)
+  const Tensor2D<T> dt_proj_weight;        // (layer, d_inner, dt_rank)
+  const Tensor2D<T> dt_proj_bias;          // (layer, d_inner)
+  const Tensor2D<T> A;                     // (layer, d_inner, d_state)
+  const Tensor2D<T> D;                     // (layer, d_inner)
+  const Tensor2D<T> out_proj;              // (layer, dim, d_inner)
+  const Tensor2D<T> norm;                  // (layer, dim)
+  const Tensor<T> final_norm;            // (dim)
+  const Tensor<T> lm_head;               // (rounded_vocab_size, dim)
 };
 
 //read and written to

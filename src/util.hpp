@@ -72,32 +72,32 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
   // 13B+ models
   unsigned long long n_layers = p->n_layers;
   // get the pointers to the weights
-  w->token_embedding_table = ptr;
+  w->token_embedding_table = Tensor<T>(ptr);
   ptr += p->rounded_vocab_size * p->dim;
-  w->in_proj = ptr;
+  w->in_proj = Tensor2D<T>(ptr);
   ptr += n_layers * (2 * p->d_inner) * p->dim;
-  w->conv1d_weight = ptr;
+  w->conv1d_weight = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner * 1 * p->d_conv;
-  w->conv1d_bias = ptr;
+  w->conv1d_bias = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner;
-  w->x_proj = ptr;
+  w->x_proj = Tensor2D<T>(ptr);
   ptr += n_layers * (p->dt_rank + 2 * p->d_state) * p->d_inner;
-  w->dt_proj_weight = ptr;
+  w->dt_proj_weight = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner * p->dt_rank;
-  w->dt_proj_bias = ptr;
+  w->dt_proj_bias = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner;
-  w->A = ptr;
+  w->A = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner * p->d_state;
-  w->D = ptr;
+  w->D = Tensor2D<T>(ptr);
   ptr += n_layers * p->d_inner;
-  w->out_proj = ptr;
+  w->out_proj = Tensor2D<T>(ptr);
   ptr += n_layers * p->dim * p->d_inner;
-  w->norm = ptr;
+  w->norm = Tensor2D<T>(ptr);
   ptr += n_layers * p->dim;
-  w->final_norm = ptr;
+  w->final_norm = Tensor<T>(ptr);
   ptr += p->dim;
   // the classifier weights can be shared with the token embedding table
-  w->lm_head = w->token_embedding_table;
+  w->lm_head = w->token_embedding_table->data;
   /*for(int i = 0; i < p->rounded_vocab_size * p->dim; i++) {
          if(w->token_embedding_table[i] != 0)
           std::cout << w->token_embedding_table[i] << std::endl;
@@ -105,21 +105,46 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
 }
 
 template <typename T>
-inline T *quantized_to_float_tensor(size_t dim, uint8_t num_bits,
-                                    uint8_t **ptr_to_ptr, int n_layers = 1) {
+inline Tensor<T> quantized_to_float_tensor(size_t dim, uint8_t num_bits,
+                                    uint8_t **ptr_to_ptr) {
   uint8_t *ptr = *ptr_to_ptr;
-  T *tensor = (T *)malloc(n_layers * dim * sizeof(T));
+  T *tensor_data = (T *)malloc(dim * sizeof(T));
+
+  float scale = *(float *)ptr;
+  ptr += sizeof(float);
+
+  float zeropoint = *(float *)ptr;
+  ptr += sizeof(float);
+
+  for (size_t i = 0; i < dim; i++) {
+    T quantized_val = *(T *)ptr;
+    ptr += sizeof(T);
+
+    tensor_data[i] = quantized_val; //(quantized_val - zeropoint) / scale;
+  }
+
+  *ptr_to_ptr = ptr;
+  return Tensor<T>(scale, zeropoint, tensor_data);
+}
+
+template <typename T>
+inline Tensor2D<T> quantized_to_float_tensor(size_t dim, uint8_t num_bits,
+                                    uint8_t **ptr_to_ptr, int n_layers) {
+  uint8_t *ptr = *ptr_to_ptr;
+  T *tensor_data = (T *)malloc(n_layers * dim * sizeof(T));
+  float *scales = (float *)malloc(n_layers * sizeof(float));
+  float *zeropoints = (float*)malloc(n_layers * sizeof(float));
 
   // uint8_t val = 0;
   // uint8_t pos = 0;
 
   for (int l = 0; l < n_layers; l++) {
-    T *layer = tensor + l * dim;
+    T *layer = tensor_data + l * dim;
 
-    float scale = *(float *)ptr;
+    scales[l] = *(float *)ptr;
     ptr += sizeof(float);
 
-    float zeropoint = *(float *)ptr;
+    zeropoints[l] = *(float *)ptr;
     ptr += sizeof(float);
 
     for (size_t i = 0; i < dim; i++) {
@@ -131,7 +156,7 @@ inline T *quantized_to_float_tensor(size_t dim, uint8_t num_bits,
   }
 
   *ptr_to_ptr = ptr;
-  return tensor;
+  return Tensor2D<T>(scales, zeropoints, dim, tensor_data);
 }
 
 template <typename T>

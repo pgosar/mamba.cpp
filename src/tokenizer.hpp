@@ -34,16 +34,16 @@ inline int compare_tokens(const void *a, const void *b) {
   return strcmp(((TokenIndex *)a)->str, ((TokenIndex *)b)->str);
 }
 
-inline void build_tokenizer(Tokenizer *t, char *tokenizer_path) {
+inline void build_tokenizer(Tokenizer *t, std::string tokenizer_path) {
   // initialize the byte_pieces array
   for (int i = 0; i < 256; i++) {
     t->byte_pieces[i * 2] = (unsigned char)i;
     t->byte_pieces[i * 2 + 1] = '\0';
   }
   // read in the file
-  FILE *file = fopen(tokenizer_path, "rb");
+  FILE *file = fopen(tokenizer_path.c_str(), "rb");
   if (!file) {
-    fprintf(stderr, "couldn't load %s\n", tokenizer_path);
+    fprintf(stderr, "couldn't load %s\n", tokenizer_path.c_str());
     exit(EXIT_FAILURE);
   }
   // read vocab_size
@@ -134,15 +134,11 @@ inline int str_lookup(const char *str, TokenIndex *sorted_vocab,
   return res != NULL ? res->id : -1;
 }
 
-inline void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
+inline void encode(Tokenizer *t, std::string text, int8_t add_bos, int8_t add_eos,
                    int *tokens, int *n_tokens) {
   // encode the string text (input) into an upper-bound preallocated tokens[]
   // array add_bos != 0 means prepend the BOS token, add_eos != 0 means append
   // the EOS token
-  if (text == NULL) {
-    fprintf(stderr, "cannot encode NULL text\n");
-    exit(EXIT_FAILURE);
-  }
 
   if (t->sorted_vocab == NULL) {
     // lazily malloc and sort the vocabulary
@@ -187,7 +183,7 @@ inline void encode(Tokenizer *t, char *text, int8_t add_bos, int8_t add_eos,
   // U+10000	U+10FFFF    11110xxx	10xxxxxx	10xxxxxx	10xxxxxx
 
   // process the raw (UTF-8) byte sequence of the input string
-  for (char *c = text; *c != '\0'; c++) {
+  for (const char *c = text.c_str(); *c != '\0'; c++) {
 
     // reset buffer if the current byte is ASCII or a leading byte
     // 0xC0 is 11000000, so (*c & 0xC0) keeps the first 2 bits and zeros the
