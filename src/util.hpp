@@ -16,25 +16,34 @@
 
 #include "mamba.hpp"
 
+template <typename T> inline EnhancedTensor<T> allocateTensor(size_t dim) {
+  T *buffer = static_cast<T *>(malloc(dim * sizeof(T)));
+  return EnhancedTensor<T>(buffer, dim);
+}
+
+template <typename T> inline EnhancedTensor2D<T> allocateTensor2D(size_t dim, size_t n_layers) {
+  T *buffer = static_cast<T *>(calloc(n_layers * dim, sizeof(T)));
+  return EnhancedTensor2D<T>(buffer, dim, n_layers);
+}
+
 template <typename T> inline void malloc_run_state(RunState<T> *s, Config *p) {
   // memory reused by all layers
   try {
-    s->input = static_cast<T *>(malloc(p->dim * sizeof(T)));
-    s->hidden_state = static_cast<T *>(malloc(p->dim * sizeof(T)));
-    s->xz = static_cast<T *>(malloc(2 * p->d_inner * sizeof(T)));
-    s->x_db =
-        static_cast<T *>(malloc((p->dt_rank + 2 * p->d_state) * sizeof(T)));
-    s->dt = static_cast<T *>(malloc(p->d_inner * sizeof(T)));
-    s->dA = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
-    s->dB = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
-    s->temp = static_cast<T *>(malloc(p->d_inner * p->d_state * sizeof(T)));
-    s->y = static_cast<T *>(malloc(p->d_inner * sizeof(T)));
-    s->logits = static_cast<T *>(malloc(p->rounded_vocab_size * sizeof(T)));
+    s->input = std::move(allocateTensor<T>(p->dim));
+    s->hidden_state = allocateTensor<T>(p->dim);
+
+    s->xz = allocateTensor<T>(2 * p->d_inner);
+    s->x_db = allocateTensor<T>(p->dt_rank + 2 * p->d_state);
+    s->dt = allocateTensor<T>(p->d_inner);
+    s->dA = allocateTensor<T>(p->d_inner * p->d_state);
+    s->dB = allocateTensor<T>(p->d_inner * p->d_state);
+    s->temp = allocateTensor<T>(p->d_inner * p->d_state);
+    s->y = allocateTensor<T>(p->d_inner);
+
+    s->logits = allocateTensor<T>(p->rounded_vocab_size);
     // internal state, separate memory for each layer
-    s->conv_state = static_cast<T *>(
-        calloc(p->n_layers * p->d_inner * p->d_conv, sizeof(T)));
-    s->ssm_state = static_cast<T *>(
-        calloc(p->n_layers * p->d_inner * p->d_state, sizeof(T)));
+    s->conv_state = allocateTensor2D<T>(p->d_inner * p->d_conv, p->n_layers);
+    s->ssm_state = allocateTensor2D<T>(p->d_inner * p->d_state, p->n_layers);
   } catch (std::bad_alloc &e) {
     std::cerr << "Memory allocation failed: " << e.what() << std::endl;
     std::exit(EXIT_FAILURE);
@@ -74,30 +83,41 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
   // get the pointers to the weights
   w->token_embedding_table = Tensor<T>(ptr);
   ptr += p->rounded_vocab_size * p->dim;
-  w->in_proj = Tensor2D<T>(ptr);
+
+  w->in_proj = Tensor2D<T>(ptr, (2 * p->d_inner) * p->dim);
   ptr += n_layers * (2 * p->d_inner) * p->dim;
-  w->conv1d_weight = Tensor2D<T>(ptr);
+
+  w->conv1d_weight = Tensor2D<T>(ptr, p->d_inner * 1 * p->d_conv);
   ptr += n_layers * p->d_inner * 1 * p->d_conv;
-  w->conv1d_bias = Tensor2D<T>(ptr);
+
+  w->conv1d_bias = Tensor2D<T>(ptr, p->d_inner);
   ptr += n_layers * p->d_inner;
-  w->x_proj = Tensor2D<T>(ptr);
+
+  w->x_proj = Tensor2D<T>(ptr, (p->dt_rank + 2 * p->d_state) * p->d_inner);
   ptr += n_layers * (p->dt_rank + 2 * p->d_state) * p->d_inner;
-  w->dt_proj_weight = Tensor2D<T>(ptr);
+
+  w->dt_proj_weight = Tensor2D<T>(ptr, p->d_inner * p->dt_rank);
   ptr += n_layers * p->d_inner * p->dt_rank;
-  w->dt_proj_bias = Tensor2D<T>(ptr);
+
+  w->dt_proj_bias = Tensor2D<T>(ptr, p->d_inner);
   ptr += n_layers * p->d_inner;
-  w->A = Tensor2D<T>(ptr);
+
+  w->A = Tensor2D<T>(ptr, p->d_inner * p->d_state);
   ptr += n_layers * p->d_inner * p->d_state;
-  w->D = Tensor2D<T>(ptr);
+
+  w->D = Tensor2D<T>(ptr, p->d_inner);
   ptr += n_layers * p->d_inner;
-  w->out_proj = Tensor2D<T>(ptr);
+
+  w->out_proj = Tensor2D<T>(ptr, p->dim * p->d_inner);
   ptr += n_layers * p->dim * p->d_inner;
-  w->norm = Tensor2D<T>(ptr);
+
+  w->norm = Tensor2D<T>(ptr, p->dim);
   ptr += n_layers * p->dim;
+
   w->final_norm = Tensor<T>(ptr);
   ptr += p->dim;
   // the classifier weights can be shared with the token embedding table
-  w->lm_head = w->token_embedding_table->data;
+  w->lm_head = w->token_embedding_table;
   /*for(int i = 0; i < p->rounded_vocab_size * p->dim; i++) {
          if(w->token_embedding_table[i] != 0)
           std::cout << w->token_embedding_table[i] << std::endl;
@@ -174,7 +194,7 @@ inline void memory_map_quantized_weights(MambaWeights<T> *w, Config *p,
 
   tensor_dim = (2 * p->d_inner) * p->dim;
   w->in_proj =
-      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers);
+      std::move(quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers));
 
   tensor_dim = p->d_inner * 1 * p->d_conv;
   w->conv1d_weight =

@@ -74,37 +74,37 @@ typedef struct {
 
 //readonly
 template <typename T> struct MambaWeights {
-  const Tensor<T> token_embedding_table; // (rounded_vocab_size, dim)              
-  const Tensor2D<T> in_proj;               // (layer, 2*d_inner, dim)                
-  const Tensor2D<T> conv1d_weight;         // (layer, d_inner, 1, d_conv)
-  const Tensor2D<T> conv1d_bias;           // (layer, d_inner)
-  const Tensor2D<T> x_proj;                // (layer, dt_rank+2*d_state, d_inner)
-  const Tensor2D<T> dt_proj_weight;        // (layer, d_inner, dt_rank)
-  const Tensor2D<T> dt_proj_bias;          // (layer, d_inner)
-  const Tensor2D<T> A;                     // (layer, d_inner, d_state)
-  const Tensor2D<T> D;                     // (layer, d_inner)
-  const Tensor2D<T> out_proj;              // (layer, dim, d_inner)
-  const Tensor2D<T> norm;                  // (layer, dim)
-  const Tensor<T> final_norm;            // (dim)
-  const Tensor<T> lm_head;               // (rounded_vocab_size, dim)
+  Tensor<T> token_embedding_table; // (rounded_vocab_size, dim)              
+  Tensor2D<T> in_proj;               // (layer, 2*d_inner, dim)                
+  Tensor2D<T> conv1d_weight;         // (layer, d_inner, 1, d_conv)
+  Tensor2D<T> conv1d_bias;           // (layer, d_inner)
+  Tensor2D<T> x_proj;                // (layer, dt_rank+2*d_state, d_inner)
+  Tensor2D<T> dt_proj_weight;        // (layer, d_inner, dt_rank)
+  Tensor2D<T> dt_proj_bias;          // (layer, d_inner)
+  Tensor2D<T> A;                     // (layer, d_inner, d_state)
+  Tensor2D<T> D;                     // (layer, d_inner)
+  Tensor2D<T> out_proj;              // (layer, dim, d_inner)
+  Tensor2D<T> norm;                  // (layer, dim)
+  Tensor<T> final_norm;            // (dim)
+  Tensor<T> lm_head;               // (rounded_vocab_size, dim)
 };
 
 //read and written to
 template <typename T> struct RunState {
   // memory reused by all layers
-  T *input;        // (dim)
-  T *hidden_state; // (dim)
-  T *xz;           // (2*d_inner)          x and z are pointers into this buffer
-  T *x_db;   // (dt_rank+2*d_state)  dt, B, C are pointers into this buffer
-  T *dt;     // (d_inner)            later, dt is a pointer to this buffer
-  T *dA;     // (d_inner, d_state)
-  T *dB;     // (d_inner, d_state)
-  T *temp;   // (d_inner, d_state)
-  T *y;      // (d_inner)
-  T *logits; // (rounded_vocab_size)
+  EnhancedTensor<T> input;        // (dim)
+  EnhancedTensor<T> hidden_state; // (dim)
+  EnhancedTensor<T> xz;           // (2*d_inner)          x and z are pointers into this buffer
+  EnhancedTensor<T> x_db;   // (dt_rank+2*d_state)  dt, B, C are pointers into this buffer
+  EnhancedTensor<T> dt;     // (d_inner)            later, dt is a pointer to this buffer
+  EnhancedTensor<T> dA;     // (d_inner, d_state)
+  EnhancedTensor<T> dB;     // (d_inner, d_state)
+  EnhancedTensor<T> temp;   // (d_inner, d_state)
+  EnhancedTensor<T> y;      // (d_inner)
+  EnhancedTensor<T> logits; // (rounded_vocab_size)
   // internal state, separate memory for each layer
-  T *conv_state; // (n_layers, d_inner, d_conv)
-  T *ssm_state;  // (n_layers, d_inner, d_state)
+  EnhancedTensor2D<T> conv_state; // (n_layers, d_inner, d_conv)
+  EnhancedTensor2D<T> ssm_state;  // (n_layers, d_inner, d_state)
   float *dequantized_buffer;
 };
 

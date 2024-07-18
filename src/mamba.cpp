@@ -130,17 +130,21 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   const T *content_row = w->token_embedding_table + token * dim;
   memcpy(input, content_row, dim * sizeof(T));
 
+  Tensor<T> inputTensor(w->token_embedding_table.scale(), 
+                        w->token_embedding_table.zeropoint(),
+                        input);
+
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {
     // normalize the input
-    rmsnorm(hidden_state, input, w->norm+l*dim, dim);
+    rmsnorm(hidden_state, inputTensor, w->norm+l*dim, dim);
     // forward this layer
     forward_layer(mamba, l, hidden_state);
     // residual connection back into hidden_state
     for (int i = 0; i < dim; i++) {
-      hidden_state[i] += input[i];
+      hidden_state[i] += inputTensor[i];
       // copy hidden_state back into input for the next layer
-      input[i] = hidden_state[i];
+      inputTensor[i] = hidden_state[i];
     }
   }
 
@@ -578,7 +582,7 @@ int main(int argc, char *argv[]) {
     } else if (mode.compare("chat") == 0) {
       chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
     } else {
-      fprintf(stderr, "unknown mode: %s\n", mode);
+      fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
     }
 
