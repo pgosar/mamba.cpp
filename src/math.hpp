@@ -89,8 +89,16 @@ public:
     _data[i] = value;
   }
 
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
   float operator[](size_t i) const {
     return dequantize(i);
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  float& operator[](size_t i) {
+    return _data[i];
   }
 
   const T* data() const {
@@ -214,6 +222,11 @@ public:
 
     this->_data[i] = d;
   }
+
+  //Used to prevent data from being freed on destruction, if using a shared buffer
+  void detach() {
+    this->_data = nullptr;
+  }
 };
 
 template <Number T>
@@ -277,8 +290,16 @@ public:
     _data[i] = value;
   }
 
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
   float operator[](size_t i) const {
     return dequantize(i);
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  float& operator[](size_t i) {
+    return _data[i];
   }
 
   const T* data() const {
@@ -326,7 +347,7 @@ public:
 
       this->_scales[l] = (2.0 * T_MAX) / x_range;
       this->_zeropoints[l] = std::round(-this->_scales[l] * min - T_MAX);
-      
+
       T* layer = this->data + l * this->_layer_len;
       for(int i = 0; i < this->_layer_len; i++) {
         float converted = dequantized_layer[i] * this->_scales[l] + this->_zeropoints[l];
@@ -367,37 +388,40 @@ template <typename T> inline void rmsnorm(
   // normalize and scale
   EnhancedTensor<float> temp(tempbuf, size);
   for (int j = 0; j < size; j++) {
-    temp.set(j, x[j] * weight[j] * ss); //Todo new macro to dequantize
+    temp[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
   }
 
   o.requantize(temp);
 }
 
-template <typename T> inline void softmax(T *x, int size) {
+template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int size) {
   // find max value (for numerical stability)
   float max_val = x[0];
   for (int i = 1; i < size; i++) {
-    if (x[i] > max_val) {
-      max_val = x[i];
-    }
+    max_val = std::max(max_val, x[i]);
   }
+  
+  EnhancedTensor<float> temp(tempbuf, size);
   // exp and sum
   float sum = 0.0f;
   for (int i = 0; i < size; i++) {
-    x[i] = expf(x[i] - max_val);
-    sum += x[i];
+    temp[i] = expf(x[i] - max_val);
+    sum += temp[i];
   }
+
   // normalize
   for (int i = 0; i < size; i++) {
-    x[i] /= sum;
+    temp[i] /= sum;
   }
+
+  x.requantize(temp);
 }
 
-template <typename T> inline T softplus(T x) { return logf(1.0f + expf(x)); }
+inline float softplus(float x) { return logf(1.0f + expf(x)); }
 
-template <typename T> inline T sigmoid(T x) { return 1.0f / (1.0f + expf(-x)); }
+inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
 
-template <typename T> inline T silu(T x) { return x * sigmoid(x); }
+inline float silu(float x) { return x * sigmoid(x); }
 
 template <typename T>
 inline void shift_matrix_left(T *matrix, int rows, int cols) {
