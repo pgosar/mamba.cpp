@@ -187,8 +187,8 @@ public:
     float max = FLT_MAX;
     float min = -FLT_MAX;
     for(int i = 0; i < _len; i++) {
-      if(this->_data[i] > max) max = this->_data[i];
-      if(this->_data[i] < min) min = this->_data[i];
+      max = std::max(t.data[i], max);
+      min = std::min(t.data[i], min);
     }
 
     float x_range = max - min;
@@ -313,10 +313,10 @@ public:
     for(int l = 0; l < _n_layers; l++) {
       float max = FLT_MAX;
       float min = -FLT_MAX;
-      T* layer = this->data + l * this->_layer_len;
+      float* dequantized_layer = t._data + l * this->_layer_len;
       for(int i = 0; i < this->_layer_len; i++) {
-        if(layer[i] > max) max = layer[i];
-        if(layer[i] < min) min = layer[i];
+        max = std::max(dequantized_layer[i], max);
+        min = std::min(dequantized_layer[i], min);
       }
 
       float x_range = max - min;
@@ -326,8 +326,8 @@ public:
 
       this->_scales[l] = (2.0 * T_MAX) / x_range;
       this->_zeropoints[l] = std::round(-this->_scales[l] * min - T_MAX);
-
-      float* dequantized_layer = t._data + l * this->_layer_len;
+      
+      T* layer = this->data + l * this->_layer_len;
       for(int i = 0; i < this->_layer_len; i++) {
         float converted = dequantized_layer[i] * this->_scales[l] + this->_zeropoints[l];
         if (converted > T_MAX - 1) layer[i] = T_MAX-1;
@@ -347,20 +347,30 @@ public:
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
 
-template <typename T> inline void rmsnorm(T *o, const T *x, const T *weight, int size) {
+template <typename T> inline void rmsnorm(
+  EnhancedTensor<T>& o, 
+  const Tensor<T>& x, 
+  const Tensor<T>& weight, 
+  T *tempbuf,
+  int size
+  ) {
   // calculate sum of squares
   float ss = 0.0f;
   for (int j = 0; j < size; j++) {
-    ss += x[j] * x[j];
+    float xj = x[j];
+    ss += xj * xj;
   }
   ss /= size;
   ss += 1e-5f;
   ss = 1.0f / sqrtf(ss);
 
   // normalize and scale
+  EnhancedTensor<float> temp(tempbuf, size);
   for (int j = 0; j < size; j++) {
-    o[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
+    temp.set(j, x[j] * weight[j] * ss); //Todo new macro to dequantize
   }
+
+  o.requantize(temp);
 }
 
 template <typename T> inline void softmax(T *x, int size) {
