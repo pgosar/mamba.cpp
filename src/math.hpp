@@ -4,366 +4,7 @@
 #include <math.h>
 #include <cfloat>
 
-// tensors
-template <typename T>
-concept Number = std::integral<T> || std::floating_point<T>;
-
-template <Number T>
-class Tensor {
-protected:
-  float _scale;      //for dequantization
-  float _zeropoint;  //^
-  T* _data;
-
-public:
-  Tensor(float scale, float zeropoint, T* data) : 
-    _scale(scale), _zeropoint(zeropoint), _data(data)
-  {}
-
-  Tensor(T* data) :
-    _scale(0.0f), _zeropoint(0.0f), _data(data)
-  {}
-
-  Tensor() :
-    _scale(0.0f), _zeropoint(0.0f), _data(NULL)
-  {}
-
-  //Move
-  Tensor(Tensor<T>&& other) :
-    _scale(std::exchange(other._scale, 0.0f)),
-    _zeropoint(std::exchange(other._zeropoint, 0.0f)),
-    _data(std::exchange(other._data, nullptr))
-  {}
-  
-  Tensor<T>& operator=(Tensor<T>&& other)
-  {
-    _scale = std::exchange(other._scale, 0.0f);
-    _zeropoint = std::exchange(other._zeropoint, 0.0f);
-    _data = std::exchange(other._data, nullptr);
-    return *this;
-  }
-
-  //Copy
-  Tensor(Tensor<T>& other) :
-    _scale(other._scale),
-    _zeropoint(other._zeropoint, 0.0f),
-    _data(other._data, nullptr)
-  {}
-  
-  Tensor<T>& operator=(Tensor<T>& other)
-  {
-    _scale = other._scale;
-    _zeropoint = other._zeropoint;
-    _data = other._data;
-
-    return *this;
-  }
-
-  ~Tensor() {
-    delete _data;
-  }
-
-  //TODO maybe go down to int? 
-  //will we even have tensors with such high dim anyways?
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    return _data[i];
-  }
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  inline T quantize(size_t i, float value) const {
-    _data[i] = static_cast<T>(((value * _scale) + _zeropoint) + .5 * signbit(value));
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  inline T quantize(size_t i, float value) const {
-    _data[i] = value;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  float operator[](size_t i) const {
-    return dequantize(i);
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  float& operator[](size_t i) {
-    return _data[i];
-  }
-
-  const T* data() const {
-    return const_cast<T*>(data);
-  }
-
-  float scale() const {
-    return _scale;
-  }
-
-  float zeropoint() const {
-    return _zeropoint;
-  }
-};
-
-/*
-* A Tensor that stores its length and provides tensor-wide operations
-* Very slightly higher memory footprint than base Tensor 
-* (24 vs 16 bytes, usually negligible)
-*
-* TODO parallel implementation
-*/
-template <Number T>
-class EnhancedTensor : Tensor<T> {
-private:
-  size_t _len;
-
-public:
-  EnhancedTensor(float scale, float zeropoint, T* data, size_t len) :
-    Tensor<T>(scale, zeropoint, data), _len(len)
-  {}
-
-  EnhancedTensor(T* data, size_t len) :
-    Tensor<T>(data), _len(len)
-  {}
-
-  EnhancedTensor() :
-    Tensor<T>(), _len(0)
-  {}
-
-    //Move
-  EnhancedTensor(EnhancedTensor<T>&& other) :
-    Tensor<T>(), _len(std::exchange(other._len, 0))
-  {}
-  
-  EnhancedTensor<T>& operator=(EnhancedTensor<T>&& other)
-  {
-    Tensor<T>::operator=(other);
-    _len = std::exchange(other._len, 0);
-    return *this;
-  }
-
-  //Copy
-  EnhancedTensor(EnhancedTensor<T>& other) :
-    Tensor<T>(other), _len(other._len)
-  {}
-  
-  EnhancedTensor<T>& operator=(EnhancedTensor<T>& other)
-  {
-    Tensor<T>::operator=(other);
-    _len = other._len;
-
-    return *this;
-  }
-
-  EnhancedTensor<float> dequantize() {
-    //todo use templates
-    if(std::is_same<T, float>::value) return this;
-
-    float* dequantized = (float*) malloc(_len * sizeof(float));
-    for(size_t i = 0; i < _len; i++) {
-      dequantized[i] = (this->_data[i] - this->_zeropoint) / this->_scale;
-    }
-
-    EnhancedTensor<float> ret(1, 0, dequantized, _len);
-    return ret;
-  }
-
-  EnhancedTensor<float> dequantize(float* dequantize_buffer) {
-    //todo use templates
-    if(std::is_same<T, float>::value) return this;
-
-    for(size_t i = 0; i < _len; i++) {
-      dequantize_buffer[i] = (this->_data[i] - this->_zeropoint) / this->_scale;
-    }
-
-    EnhancedTensor<float> ret(1, 0, dequantize_buffer, _len);
-    return ret;
-  }
-
-  void requantize(EnhancedTensor<float>& t) {
-    if(std::is_same<T, float>::value) return; 
-
-    float max = FLT_MAX;
-    float min = -FLT_MAX;
-    for(int i = 0; i < _len; i++) {
-      max = std::max(t.data[i], max);
-      min = std::min(t.data[i], min);
-    }
-
-    float x_range = max - min;
-    x_range = x_range == 0 ? 1 : x_range;
-
-    constexpr T T_MAX = 1 << (sizeof(T)-1); 
-
-    this->_scale = (2.0 * T_MAX) / x_range;
-    this->_zeropoint = std::round(-this->_scale * min - T_MAX);
-
-    for(int i = 0; i < _len; i++) {
-      float converted = t._data[i] * this->_scale + this->_zeropoint;
-      if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
-      else if (converted < -T_MAX) this->_data[i] = -T_MAX;
-      else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
-    }
-  }
-
-  void set(size_t i, T d) {
-    if(i > _len) {
-      throw std::exception();
-    }
-
-    this->_data[i] = d;
-  }
-
-  //Used to prevent data from being freed on destruction, if using a shared buffer
-  void detach() {
-    this->_data = nullptr;
-  }
-};
-
-template <Number T>
-class Tensor2D {
-protected:
-  float* _scales;
-  float* _zeropoints;
-  size_t _layer_len;
-  T* _data;
-
-public:
-  Tensor2D(float* scales, float* zeropoints, size_t layer_len, T* data) :
-    _scales(scales), _zeropoints(zeropoints), _layer_len(layer_len), _data(data)
-  {}
-
-  Tensor2D(T* data, size_t layer_len) :
-    _scales(NULL), _zeropoints(NULL), _layer_len(layer_len), _data(data)
-  {}
-
-  Tensor2D() :
-    _scales(NULL), _zeropoints(NULL), _layer_len(0), _data(NULL)
-  {}
-
-  //Move
-  Tensor2D(Tensor2D<T>&& other) = default;
-  Tensor2D<T>& operator=(Tensor2D<T>&&) = default;
-
-  ~Tensor2D() {
-    delete _data;
-    delete _scales;
-    delete _zeropoints;
-  }
-
-  //TODO maybe go down to int? 
-  //will we even have tensors with such high dim anyways?
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    float scale = _scales[i / _layer_len];
-    float zeropoint = _zeropoints[i / _layer_len];
-    return (static_cast<float>(_data[i]) - zeropoint) / scale;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    return _data[i];
-  }
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  inline T quantize(size_t i, float value) const {
-    float scale = _scales[i / _layer_len];
-    float zeropoint = _zeropoints[i / _layer_len];
-    _data[i] = static_cast<T>(((value * scale) + zeropoint) + .5 * signbit(value));
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  inline T quantize(size_t i, float value) const {
-    _data[i] = value;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  float operator[](size_t i) const {
-    return dequantize(i);
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  float& operator[](size_t i) {
-    return _data[i];
-  }
-
-  const T* data() const {
-    return const_cast<T*>(data);
-  }
-};
-
-template <Number T>
-class EnhancedTensor2D : Tensor2D<T> {
-private:
-  size_t _n_layers;
-
-public:
-  EnhancedTensor2D() :
-    Tensor2D<T>(), _n_layers(0)
-  {}
-
-  EnhancedTensor2D(T* data, size_t layer_len, size_t n_layers) :
-    Tensor2D<T>(data, layer_len), _n_layers(n_layers)
-  {
-    this->_scales = static_cast<float *>(malloc(n_layers * sizeof(float)));
-    this->_zeropoints = static_cast<float *>(malloc(n_layers * sizeof(float)));
-  }
-
-  EnhancedTensor2D(float* scales, float* zeropoints, T* data, size_t n_layers) :
-    Tensor2D<T>(scales, zeropoints, data), _n_layers(n_layers)
-  {}
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  void requantize(EnhancedTensor2D<float>& t) {
-    for(int l = 0; l < _n_layers; l++) {
-      float max = FLT_MAX;
-      float min = -FLT_MAX;
-      float* dequantized_layer = t._data + l * this->_layer_len;
-      for(int i = 0; i < this->_layer_len; i++) {
-        max = std::max(dequantized_layer[i], max);
-        min = std::min(dequantized_layer[i], min);
-      }
-
-      float x_range = max - min;
-      x_range = x_range == 0 ? 1 : x_range;
-
-      constexpr T T_MAX = 1 << (sizeof(T)-1); 
-
-      this->_scales[l] = (2.0 * T_MAX) / x_range;
-      this->_zeropoints[l] = std::round(-this->_scales[l] * min - T_MAX);
-
-      T* layer = this->data + l * this->_layer_len;
-      for(int i = 0; i < this->_layer_len; i++) {
-        float converted = dequantized_layer[i] * this->_scales[l] + this->_zeropoints[l];
-        if (converted > T_MAX - 1) layer[i] = T_MAX-1;
-        else if (converted < -T_MAX) layer[i] = -T_MAX;
-        else layer[i] = static_cast<T>(converted  + .5 * signbit(converted));
-      }
-    }
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  void requantize(EnhancedTensor2D<float> &t) {
-    //nop, data isn't quantized in the first place
-  }
-};
+#include "tensor.hpp"
 
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
@@ -424,125 +65,215 @@ inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
 inline float silu(float x) { return x * sigmoid(x); }
 
 template <typename T>
-inline void shift_matrix_left(T *matrix, int rows, int cols) {
+inline void shift_matrix_left(EnhancedTensor2D<T>& matrix, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols - 1; j++) {
-      matrix[i * cols + j] = matrix[i * cols + j + 1];
+      matrix.set(i * cols + j, matrix.get(i * cols + j + 1));
     }
   }
 }
 
 template <typename T>
-inline void update_last_column(T *matrix, const T *x, int rows, int cols) {
+inline void update_last_column(EnhancedTensor2D<T>& matrix, const Tensor<T>& x, int rows, int cols) {
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
-    matrix[i * cols + cols - 1] = x[i];
+    matrix.set(i * cols + cols - 1, x.get(i));
   }
 }
 
 template <typename T>
-inline void rowwise_dot_product(T *out, const T *matrix, const T *weights, int rows,
-                                int cols) {
+inline void rowwise_dot_product(
+  EnhancedTensor<T>& out, 
+  const Tensor2D<T>& matrix, 
+  const Tensor<T>& weights, 
+  float* tempbuf,
+  int rows,
+  int cols) {
 // matrix[rows,cols], weights[cols] -> out[rows]
 // this is a dot product of each row of the matrix with the weights
 // i.e. out[i] = matrix[i,:] @ weights
+EnhancedTensor<float> temp(tempbuf, rows);
+
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     float val = 0.0f;
     for (int j = 0; j < cols; j++) {
       val += matrix[i * cols + j] * weights[j];
     }
-    out[i] = val;
+    temp[i] = val;
   }
+
+  out.requantize(temp);
 }
 
 //TODO optimize
-template <typename T> inline void matmul(T *xout, const T *x, const T *w, int d, int n) {
+template <typename T> inline void matmul(
+  EnhancedTensor<T>& xout, 
+  const Tensor<T>& x, 
+  const Tensor<T>& w, 
+  float *tempbuf,
+  int d, 
+  int n) {
 // w[d,n] @ x[n] -> xout[d]
+  EnhancedTensor<float> temp(tempbuf, d);
+
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
     float val = 0.0f;
     for (int j = 0; j < n; j++) {
       val += w[i * n + j] * x[j];
     }
-    xout[i] = val;
+    temp[i] = val;
   }
+
+  x_out.requantize(temp);
 }
 
 template <typename T>
-inline void linear(T *xout, const T *x, const T *w, const T *b, int d, int n) {
+inline void linear(EnhancedTensor<T>& xout, 
+                   const Tensor<T>& x, 
+                   const Tensor<T>& w, 
+                   const Tensor<T>& b, 
+                   float* tempbuf, int d, int n) {
 // w[d,n] @ x[n] + b[d] -> xout[d]
+  EnhancedTensor<float> temp(tempbuf, d);
+
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
     float val = 0.0f;
     for (int j = 0; j < n; j++) {
       val += w[i * n + j] * x[j];
     }
-    xout[i] = val + b[i];
+    temp[i] = val + b[i];
   }
+
+  xout.requantize(temp);
 }
 
 template <typename T>
-inline void broadcast_multiply(T *out, const T *x, const T *y, int d, int n) {
+inline void broadcast_multiply(
+  EnhancedTensor<T>& out, 
+  const Tensor<T>& x, const Tensor<T>& y, 
+  float* tempbuf, int d, int n) {
 // x[d], y[d,n] -> out[d,n]
+  EnhancedTensor<float> temp(tempbuf, d * n);
+
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
     for (int j = 0; j < n; j++) {
       int index = i * n + j;
-      out[index] = x[i] * y[index];
+      temp[index] = x[i] * y[index];
       // out[i * n + j] = x[i] * y[i * n + j];
     }
   }
+
+  out.requantize(temp);
 }
 
 template <typename T>
-inline void elementwise_multiply(T *result, const T *matrix1, const T *matrix2,
+inline void elementwise_multiply(EnhancedTensor<T>& result, 
+                                 const Tensor2D<T>& matrix1, 
+                                 const Tensor2D<T>& matrix2,
+                                 float* tempbuf,
                                  int total_elements) {
+  EnhancedTensor<float> temp(tempbuf, total_elements);
+
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
-    result[i] = matrix1[i] * matrix2[i];
+    temp[i] = matrix1[i] * matrix2[i];
   }
+
+  result.requantize(temp);
 }
 
 template <typename T>
-inline void elementwise_add(T *result, const T *matrix1, const T *matrix2,
-                            int total_elements) {
+inline void elementwise_add(
+  EnhancedTensor<T>& result, 
+  const Tensor2D<T>& matrix1, 
+  const Tensor2D<T>& matrix2,
+  float* tempbuf, int total_elements) {
+  EnhancedTensor<float> temp(tempbuf, total_elements);
+
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
-    result[i] = matrix1[i] + matrix2[i];
+    temp[i] = matrix1[i] + matrix2[i];
   }
+
+  result.requantize(temp);
 }
 
 template <typename T>
-inline void elementwise_multiply_and_add(T *result, const T *matrix1, const T *matrix2,
-                                         const T *matrix3, int total_elements) {
+inline void elementwise_multiply_and_add(
+  EnhancedTensor<T>& result, 
+  const Tensor2D<T>& matrix1, 
+  const Tensor2D<T>& matrix2,
+  const Tensor2D<T>& matrix3, 
+  float* tempbuf, int total_elements) {
+
+  EnhancedTensor<float> temp(tempbuf, total_elements);
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
-    result[i] = matrix1[i] * matrix2[i] + matrix3[i];
+    temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
+
+  result.requantize(temp);
 }
 
 template <typename T>
-inline void outer_product(T *out, const T *x, const T *y, int d, int n) {
+inline void elementwise_multiply_and_add(
+  EnhancedTensor2D<T>& result, 
+  const Tensor2D<T>& matrix1, 
+  const Tensor2D<T>& matrix2,
+  const Tensor2D<T>& matrix3, 
+  float* tempbuf, int total_elements) {
+
+  EnhancedTensor2D<float> temp(tempbuf, result._layer_len, result._n_layers);
+
+#pragma omp parallel for
+  for (int i = 0; i < total_elements; i++) {
+    temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
+  }
+
+  result.requantize(temp);
+}
+
+template <typename T>
+inline void outer_product(
+  EnhancedTensor<T>& out, 
+  const Tensor<T>& x, 
+  const Tensor<T>& y, 
+  float* tempbuf, int d, int n) {
+
+  EnhancedTensor<float> temp(tempbuf, d * n);  
 // x[d], y[n] -> out[d,n]
 #pragma omp parallel for
   for (int i = 0; i < d; i++) {
     for (int j = 0; j < n; j++) {
-      out[i * n + j] = x[i] * y[j];
+      temp[i * n + j] = x[i] * y[j];
     }
   }
+
+  out.requantize(temp);
 }
+
 template <typename T>
-inline void sum_along_last_dim(T *result, const T *matrix, int rows, int cols) {
+inline void sum_along_last_dim(
+  EnhancedTensor<T>& result, 
+  const Tensor<T>& matrix, 
+  float* tempbuf, int rows, int cols) {
+
+  EnhancedTensor<float> temp(tempbuf, rows);
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     float val = 0.0f;
     for (int j = 0; j < cols; j++) {
       val += matrix[i * cols + j];
     }
-    result[i] = val;
+    temp[i] = val;
   }
+
+  result.requantize(temp);
 }
 
 #endif // MATH_HPP
