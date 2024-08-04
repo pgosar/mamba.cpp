@@ -238,9 +238,10 @@ public:
   requantize(EnhancedTensor<float>& t) {
     float max = FLT_MAX;
     float min = -FLT_MAX;
+    float* data = t.data();
     for(int i = 0; i < _len; i++) {
-      max = std::max(t._data[i], max);
-      min = std::min(t._data[i], min);
+      max = std::max(data[i], max);
+      min = std::min(data[i], min);
     }
 
     float x_range = max - min;
@@ -252,7 +253,7 @@ public:
     this->_zeropoint = std::round(-this->_scale * min - T_MAX);
 
     for(int i = 0; i < _len; i++) {
-      float converted = t._data[i] * this->_scale + this->_zeropoint;
+      float converted = data[i] * this->_scale + this->_zeropoint;
       if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
       else if (converted < -T_MAX) this->_data[i] = -T_MAX;
       else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));

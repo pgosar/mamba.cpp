@@ -229,7 +229,7 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
       //apply_repetition_penalty(logits, prev_tokens,
       //                         userConfig.repetition_penalty);
 
-      next = sample(sampler, logits);
+      next = sample(sampler, logits, mamba->state.dequantized_buffer);
     }
     pos++;
 
@@ -357,7 +357,7 @@ void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
 
     // forward the model to get logits for the next token
     EnhancedTensor<T>& logits = forward(mamba, token);
-    next = sample(sampler, logits);
+    next = sample(sampler, logits, mamba->state.dequantized_buffer);
     pos++;
 
     if (user_idx >= num_prompt_tokens && next != EOS) {

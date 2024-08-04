@@ -379,32 +379,37 @@ inline unsigned int random_u32() { return gen(); }
 
 inline float random_f32() { return dis(gen); }
 
-template <typename T> inline int sample(Sampler *sampler, EnhancedTensor<T>& logits) {
+template <typename T> inline int sample(Sampler *sampler, EnhancedTensor<T>& logits,
+                                        float* templogits) {
   // sample the token given the logits and some hyperparameters
   int next;
 
+  logits.dequantize(templogits);
+
   if (sampler->temperature == 0.0f) {
     // greedy argmax sampling: take the token with the highest probability
-    next = sample_argmax(logits, sampler->vocab_size);
+    next = sample_argmax(templogits, sampler->vocab_size);
   } else {
     // apply the temperature to the logits
     for (int q = 0; q < sampler->vocab_size; q++) {
-      logits[q] /= sampler->temperature;
+      templogits[q] /= sampler->temperature;
     }
     // apply softmax to the logits to get the probabilities for next token
-    softmax(logits, sampler->vocab_size);
+    softmax(templogits, sampler->vocab_size);
     // flip a (float) coin (this is our source of entropy for sampling)
     float coin = random_f32();
     // we sample from this distribution to get the next token
     if (sampler->topp <= 0 || sampler->topp >= 1) {
       // simply sample from the predicted probability distribution
-      next = sample_mult(logits, sampler->vocab_size, coin);
+      next = sample_mult(templogits, sampler->vocab_size, coin);
     } else {
       // top-p (nucleus) sampling, clamping the least likely tokens to zero
-      next = sample_topp(logits, sampler->vocab_size, sampler->topp,
+      next = sample_topp(templogits, sampler->vocab_size, sampler->topp,
                          sampler->probindex, coin);
     }
   }
+
+  logits.requantize(templogits);
   return next;
 }
 

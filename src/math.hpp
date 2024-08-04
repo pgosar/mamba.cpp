@@ -57,6 +57,27 @@ template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int 
   x.requantize(temp);
 }
 
+inline void softmax(float* x, int size) {
+  // find max value (for numerical stability)
+  float max_val = x[0];
+  for (int i = 1; i < size; i++) {
+    max_val = std::max(max_val, x[i]);
+  }
+
+  // exp and sum
+  float sum = 0.0f;
+  for (int i = 0; i < size; i++) {
+    x[i] = expf(x[i] - max_val);
+    sum += x[i];
+  }
+
+  // normalize
+  for (int i = 0; i < size; i++) {
+    x[i] /= sum;
+  }
+}
+
+
 inline float softplus(float x) { return logf(1.0f + expf(x)); }
 
 inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
