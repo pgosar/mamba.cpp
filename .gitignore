@@ -6,6 +6,7 @@ env/
 models/
 .vscode/
 vcpkg/
+.idea
 .Rhistory
 .DS_Store
 .vcpkg-root
