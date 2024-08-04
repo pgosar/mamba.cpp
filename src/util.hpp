@@ -65,18 +65,18 @@ template <typename T> inline void reset_internal_state(Mamba<T> *mamba) {
 }
 
 template <typename T> inline void free_run_state(RunState<T> *s) {
-  free(s->input);
-  free(s->hidden_state);
-  free(s->xz);
-  free(s->x_db);
-  free(s->dt);
-  free(s->dA);
-  free(s->dB);
-  free(s->temp);
-  free(s->y);
-  free(s->logits);
-  free(s->conv_state);
-  free(s->ssm_state);
+  //delete s->input;
+  //delete s->hidden_state;
+  //delete s->xz;
+  //delete s->x_db;
+  //delete s->dt;
+  //delete s->dA;
+  //delete s->dB;
+  //delete s->temp;
+  //delete s->y;
+  //delete s->logits;
+  //delete s->conv_state;
+  //delete s->ssm_state;
 }
 
 template <typename T>
@@ -332,7 +332,7 @@ inline long time_in_ms() {
 // -------------------
 // minimize repetition
 template <typename T>
-inline void apply_repetition_penalty(T *logits, std::vector<int> &prev_tokens,
+inline void apply_repetition_penalty(EnhancedTensor<T>& logits, std::vector<int> &prev_tokens,
                                      float penalty) {
   if (penalty == 1.0)
     return;

@@ -3,6 +3,8 @@
 
 #include <cfloat>
 #include <concepts>
+#include <cmath>
+#include <algorithm>
 
 // tensors
 template <typename T>
@@ -25,7 +27,7 @@ public:
     _scale(scale), _zeropoint(zeropoint), _data(data)
   {}
 
-  explicit Tensor(T* data) :
+  explicit Tensor(T* const data) :
     _scale(0.0f), _zeropoint(0.0f), _data(data)
   {}
 
@@ -71,9 +73,9 @@ public:
 
   //TODO maybe go down to int? 
   //will we even have tensors with such high dim anyways?
-  template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
-  [[nodiscard]] float dequantize(int i) const {
+  template<typename X=T> [[nodiscard]]
+  typename std::enable_if_t<!std::is_same_v<X,float>, float>
+  dequantize(int i) const {
     return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
   }
 
@@ -95,10 +97,10 @@ public:
     _data[i] = value;
   }
 
-  template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
-  float operator[](size_t i) const {
-    return dequantize<T>(i);
+  template<typename X=T>
+  typename std::enable_if_t<!std::is_same_v<X,float>, float>
+  operator[](size_t i) const {
+    return dequantize(i);
   }
 
   template<typename X=T,
@@ -114,7 +116,11 @@ public:
   }
 
   [[nodiscard]] const T* data() const {
-    return const_cast<T*>(data);
+    return const_cast<T*>(_data);
+  }
+
+  [[nodiscard]] T* data() {
+    return _data;
   }
 
   [[nodiscard]] float scale() const {
@@ -131,6 +137,11 @@ public:
 
   void set(size_t i, T d) {
     this->_data[i] = d;
+  }
+
+  Tensor<T> operator+(const size_t off) {
+    return Tensor<T>(this->_scale, this->_zeropoint,
+							this->_data + off);
   }
 };
 
@@ -151,7 +162,7 @@ public:
     Tensor<T>(scale, zeropoint, data), _len(len)
   {}
 
-  EnhancedTensor(const T* data, size_t len) :
+  EnhancedTensor(T* const data, size_t len) :
     Tensor<T>(data), _len(len)
   {}
 
@@ -186,11 +197,10 @@ public:
     return *this;
   }
 
-  EnhancedTensor<float> dequantize() {
+  template<typename X=T>
+  typename std::enable_if_t<!std::is_same_v<X,float>, EnhancedTensor<float>>
+  dequantize() {
     //todo use templates
-    if(std::is_same_v<T, float>) return this;
-
-    //todo static analyzer sees memory leak??? probably false positive...
     auto dequantized = static_cast<float*>(malloc(_len * sizeof(float)));
     for(size_t i = 0; i < _len; i++) {
       dequantized[i] = (this->_data[i] - this->_zeropoint) / this->_scale;
@@ -200,10 +210,15 @@ public:
     return ret;
   }
 
-  EnhancedTensor<float> dequantize(float* dequantize_buffer) {
-    //todo use templates
-    if(std::is_same_v<T, float>) return this;
+  template<typename X=T>
+  typename std::enable_if_t<std::is_same_v<X,float>, EnhancedTensor<float>>
+  dequantize() {
+    return *this;
+  }
 
+  template<typename X=T>
+  typename std::enable_if_t<!std::is_same_v<X,float>, EnhancedTensor<float>>
+  dequantize(float* dequantize_buffer) {
     for(size_t i = 0; i < _len; i++) {
       dequantize_buffer[i] = (this->_data[i] - this->_zeropoint) / this->_scale;
     }
@@ -212,9 +227,15 @@ public:
     return ret;
   }
 
-  template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
-  void requantize(EnhancedTensor<float>& t) {
+  template<typename X=T>
+  typename std::enable_if_t<std::is_same_v<X,float>, EnhancedTensor<float>>
+  dequantize(float* dequantize_buffer) {
+    return *this;
+  }
+
+  template<typename X=T>
+  typename std::enable_if_t<!std::is_same_v<X,float>>
+  requantize(EnhancedTensor<float>& t) {
     float max = FLT_MAX;
     float min = -FLT_MAX;
     for(int i = 0; i < _len; i++) {
@@ -225,7 +246,7 @@ public:
     float x_range = max - min;
     x_range = x_range == 0 ? 1 : x_range;
 
-    constexpr T T_MAX = 1 << (sizeof(T)-1); 
+    constexpr T T_MAX = 1 << (sizeof(T)-1);
 
     this->_scale = (2.0 * T_MAX) / x_range;
     this->_zeropoint = std::round(-this->_scale * min - T_MAX);
@@ -240,11 +261,43 @@ public:
     t.detach();  //todo could use std::shared_ptr instead
   }
 
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  void requantize(EnhancedTensor<float>& t) {
+  template<typename X=T>
+  typename std::enable_if_t<std::is_same_v<X,float>>
+  requantize(EnhancedTensor<float>& t) {
     memcpy(this->_data, t._data, _len);
     t.detach();
+  }
+
+  template<typename X=T>
+  typename std::enable_if_t<!std::is_same_v<X,float>>
+  requantize(const float* t) {
+    float max = FLT_MAX;
+    float min = -FLT_MAX;
+    for(int i = 0; i < _len; i++) {
+      max = std::max(t[i], max);
+      min = std::min(t[i], min);
+    }
+
+    float x_range = max - min;
+    x_range = x_range == 0 ? 1 : x_range;
+
+    constexpr T T_MAX = 1 << (sizeof(T)-1);
+
+    this->_scale = (2.0 * T_MAX) / x_range;
+    this->_zeropoint = std::round(-this->_scale * min - T_MAX);
+
+    for(int i = 0; i < _len; i++) {
+      float converted = t[i] * this->_scale + this->_zeropoint;
+      if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
+      else if (converted < -T_MAX) this->_data[i] = -T_MAX;
+      else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+    }
+  }
+
+  template<typename X=T>
+  typename std::enable_if_t<std::is_same_v<X,float>>
+  requantize(const float* t) {
+    memcpy(this->_data, t, _len);
   }
 
   //Used to prevent data from being freed on destruction, if using a shared buffer
@@ -259,6 +312,11 @@ public:
   EnhancedTensor<T> operator+(const size_t off) {
     return EnhancedTensor<T>(this->_scale, this->_zeropoint,
 							this->_data + off, _len - off);
+  }
+
+  EnhancedTensor<T> subset(const size_t off, const size_t len) {
+    return EnhancedTensor<T>(this->_scale, this->_zeropoint,
+                                                        this->_data + off, len);
   }
 };
 
@@ -484,6 +542,11 @@ public:
 
   EnhancedTensor<T> layer(const size_t l) {
     return EnhancedTensor<T>(_scales[l], _zeropoints[l], _data + l * _layer_len, _layer_len);
+  }
+
+  void update_layer(const size_t l, const EnhancedTensor<T>& layer) {
+    _scales[l] = layer.scale();
+    _zeropoints[l] = layer.zeropoint();
   }
 
   SubTensor<T> layer_ref(const size_t l) {

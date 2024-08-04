@@ -74,7 +74,7 @@ typedef struct {
 
 //readonly
 template <typename T> struct MambaWeights {
-  Tensor<T> token_embedding_table; // (rounded_vocab_size, dim)              
+  Tensor<T> token_embedding_table; // (rounded_vocab_size, dim)
   Tensor2D<T> in_proj;               // (layer, 2*d_inner, dim)                
   Tensor2D<T> conv1d_weight;         // (layer, d_inner, 1, d_conv)
   Tensor2D<T> conv1d_bias;           // (layer, d_inner)

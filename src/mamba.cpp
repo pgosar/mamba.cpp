@@ -18,7 +18,6 @@
 #include "util.hpp"
 
 // ----------------------------------------------------------------------------
-// TODO: get rid of all the inlines by separating the hpp files into proper
 // header files change all the char arrays to std::strings
 
 template <typename T>
@@ -44,7 +43,9 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
     tempbuf,
     2 * d_inner, dim);
   // x, z = xz.chunk(2, dim=-1)
-  EnhancedTensor<T>& x = s->xz;           // x (d_inner)
+  EnhancedTensor<T> x = s->xz.subset(0,d_inner);           // x (d_inner)
+  //TODO do we need to update the scale/zeropoint of the superset tensor?
+  //or are they requantized before the read anyways...?
 
   // Conv step
 
@@ -64,9 +65,7 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // x = x + self.conv1d.bias
   elementwise_add(x, x, w->conv1d_bias.layer(l), tempbuf, d_inner);
   // x = F.silu(x)
-  for (int i = 0; i < d_inner; i++) {
-    x[i] = silu(x[i]);
-  }
+  silu(x, tempbuf);
 
   // SSM step
 
@@ -85,17 +84,14 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
          w->dt_proj_bias.layer(l), tempbuf, d_inner, dt_rank);
   dt = s->dt; // NOTE: dt is now bigger: (d_inner) instead of (dt_rank)
   // dt = F.softplus(dt)
-  for (int i = 0; i < d_inner; i++) {
-    dt[i] = softplus(dt[i]);
-  }
+  softplus(dt, tempbuf);
 
   //  Discretize A and B
   // dA = torch.exp(torch.einsum("d,dn->dn", dt, self.A))   # A (d_inner,
   // d_state), dA (d_inner, d_state)
   broadcast_multiply(dA, dt, w->A.layer(l), tempbuf, d_inner, d_state);
-  for (int i = 0; i < d_inner * d_state; i++) {
-    dA[i] = expf(dA[i]);
-  }
+  expf(dA, tempbuf);
+
   // dB = torch.einsum("d,n->dn", dt, B)    # dt (d_inner), B (d_state), dB
   // (d_inner, d_state)
   outer_product(dB, dt, B, tempbuf, d_inner, d_state);
@@ -114,17 +110,17 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   elementwise_multiply_and_add(y, w->D.layer(l), x, y, tempbuf, d_inner);
 
   // y = y * F.silu(z)  # (d_inner)
-  for (int i = 0; i < d_inner; i++) {
-    int j = i + d_inner;
-    y[i] = y[i] * silu(x[j]); //x[j] == 
-  }
+  silu(y, tempbuf);
 
   // hidden_state = self.out_proj(y)  # out_proj (dim, d_inner), hidden_state
   // (dim)
   matmul(hidden_state, y, w->out_proj.layer(l), tempbuf, dim, d_inner);
+
+  s->conv_state.update_layer(l, conv_state);
+  s->ssm_state.update_layer(l, ssm_state);
 }
 
-template <typename T> T *forward(Mamba<T> *mamba, int token) {
+template <typename T> EnhancedTensor<T>& forward(Mamba<T> *mamba, int token) {
   // a few convenience variables
   Config *p = &mamba->config;
   MambaWeights<T> *w = &mamba->weights;
@@ -132,10 +128,11 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   int dim = p->dim;
   T* input_data = s->input.data();
   EnhancedTensor<T>& hidden_state = s->hidden_state;
+  T* hidden_state_data = hidden_state.data();
 
   // copy the token embedding into x
-  const T *content_row = w->token_embedding_table + token * dim;
-  memcpy(input_data, content_row, dim * sizeof(T));
+  Tensor<T> content_row = w->token_embedding_table + token * dim;
+  memcpy(input_data, content_row.data(), dim * sizeof(T));
 
   Tensor<T> inputTensor(w->token_embedding_table.scale(), 
                         w->token_embedding_table.zeropoint(),
@@ -144,22 +141,30 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {
     // normalize the input
-    rmsnorm(hidden_state, inputTensor, w->norm+l*dim, dim);
+    rmsnorm(hidden_state, inputTensor, w->norm.layer(l),
+            s->dequantized_buffer, dim);
     // forward this layer
     forward_layer(mamba, l, hidden_state);
     // residual connection back into hidden_state
     for (int i = 0; i < dim; i++) {
-      hidden_state[i] += inputTensor[i];
+      s->dequantized_buffer[i] = input_data[i] + hidden_state_data[i];
+    }
+
+    hidden_state.requantize(s->dequantized_buffer);
+
+    for(int i = 0; i < dim; i++) {
       // copy hidden_state back into input for the next layer
-      inputTensor[i] = hidden_state[i];
+      input_data[i] = hidden_state_data[i];
     }
   }
 
   // final rmsnorm
-  rmsnorm(hidden_state, hidden_state, w->final_norm, dim);
+  rmsnorm(hidden_state, hidden_state, w->final_norm,
+          s->dequantized_buffer, dim);
 
   // classifier into logits
-  matmul(s->logits, hidden_state, w->lm_head, p->rounded_vocab_size, p->dim);
+  matmul(s->logits, hidden_state, w->lm_head,
+         s->dequantized_buffer, p->rounded_vocab_size, p->dim);
   return s->logits;
 }
 
@@ -195,7 +200,7 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
   int pos = 0;                  // position in the sequence
   while (pos < steps) {
     // forward the model to get logits for the next token
-    T *logits = forward(mamba, token);
+    EnhancedTensor<T>& logits = forward(mamba, token);
 
     // advance the state machine
     if (pos < num_prompt_tokens - 1) {
@@ -219,8 +224,10 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
       //   uses non-penalized alternatives like 1 or i.
 
       // Ideal seems to be penalty values slightly less than 1.
-      apply_repetition_penalty(logits, prev_tokens,
-                               userConfig.repetition_penalty);
+
+      //TODO this is needed, comment back-in after refactor integrity is verified
+      //apply_repetition_penalty(logits, prev_tokens,
+      //                         userConfig.repetition_penalty);
 
       next = sample(sampler, logits);
     }
@@ -349,7 +356,7 @@ void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
     }
 
     // forward the model to get logits for the next token
-    T *logits = forward(mamba, token);
+    EnhancedTensor<T>& logits = forward(mamba, token);
     next = sample(sampler, logits);
     pos++;
 

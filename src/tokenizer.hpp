@@ -379,7 +379,7 @@ inline unsigned int random_u32() { return gen(); }
 
 inline float random_f32() { return dis(gen); }
 
-template <typename T> inline int sample(Sampler *sampler, T *logits) {
+template <typename T> inline int sample(Sampler *sampler, EnhancedTensor<T>& logits) {
   // sample the token given the logits and some hyperparameters
   int next;
 

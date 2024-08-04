@@ -12,7 +12,7 @@ template <typename T> inline void rmsnorm(
   EnhancedTensor<T>& o, 
   const Tensor<T>& x, 
   const Tensor<T>& weight, 
-  T *tempbuf,
+  float *tempbuf,
   int size
   ) {
   // calculate sum of squares
@@ -31,7 +31,7 @@ template <typename T> inline void rmsnorm(
     temp[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
   }
 
-  o.<T>requantize(temp);
+  o.requantize(temp);
 }
 
 template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int size) {
@@ -54,7 +54,7 @@ template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int 
     temp[i] /= sum;
   }
 
-  x.<T>requantize(temp);
+  x.requantize(temp);
 }
 
 inline float softplus(float x) { return logf(1.0f + expf(x)); }
@@ -62,6 +62,33 @@ inline float softplus(float x) { return logf(1.0f + expf(x)); }
 inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
 
 inline float silu(float x) { return x * sigmoid(x); }
+
+template <typename T>
+inline void silu(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = silu(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void softplus(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = softplus(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void expf(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = expf(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
 
 template <typename T>
 inline void shift_matrix_left(EnhancedTensor2D<T>& matrix, int rows, int cols) {
@@ -86,7 +113,7 @@ inline void shift_left_and_update_last(
   EnhancedTensor<T>& matrix, 
   const Tensor<T>& x, 
   float* tempbuf, int rows, int cols) {
-  EnhancedTensor<float> temp = matrix.<T>dequantize(tempbuf, rows * cols);
+  EnhancedTensor<float> temp = matrix.dequantize(tempbuf);
 
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
@@ -96,7 +123,7 @@ inline void shift_left_and_update_last(
     temp[i * cols + cols - 1] = x[i];
   }
 
-  matrix.<T>requantize(temp);
+  matrix.requantize(temp);
 }
 
 template <typename T>
@@ -121,7 +148,7 @@ EnhancedTensor<float> temp(tempbuf, rows);
     temp[i] = val;
   }
 
-  out.<T>requantize(temp);
+  out.requantize(temp);
 }
 
 //TODO optimize
@@ -144,7 +171,7 @@ template <typename T> inline void matmul(
     temp[i] = val;
   }
 
-  xout.<T>requantize(temp);
+  xout.requantize(temp);
 }
 
 template <typename T>
@@ -165,7 +192,7 @@ inline void linear(EnhancedTensor<T>& xout,
     temp[i] = val + b[i];
   }
 
-  xout.<T>requantize(temp);
+  xout.requantize(temp);
 }
 
 template <typename T>
@@ -185,7 +212,7 @@ inline void broadcast_multiply(
     }
   }
 
-  out.<T>requantize(temp);
+  out.requantize(temp);
 }
 
 template <typename T>
@@ -201,7 +228,7 @@ inline void elementwise_multiply(EnhancedTensor<T>& result,
     temp[i] = matrix1[i] * matrix2[i];
   }
 
-  result.<T>requantize(temp);
+  result.requantize(temp);
 }
 
 template <typename T>
@@ -217,7 +244,7 @@ inline void elementwise_add(
     temp[i] = matrix1[i] + matrix2[i];
   }
 
-  result.<T>requantize(temp);
+  result.requantize(temp);
 }
 
 template <typename T>
@@ -234,7 +261,7 @@ inline void elementwise_multiply_and_add(
     temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
 
-  result.<T>requantize(temp);
+  result.requantize(temp);
 }
 
 template <typename T>
@@ -243,7 +270,7 @@ inline void elementwise_multiply_and_add(
   const Tensor<T>& matrix1,
   const Tensor<T>& matrix2,
   const Tensor<T>& matrix3,
-  const float* tempbuf, int total_elements) {
+  float* const tempbuf, int total_elements) {
 
   EnhancedTensor<float> temp(tempbuf, result.len());
 
@@ -252,7 +279,7 @@ inline void elementwise_multiply_and_add(
     temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
 
-  result.<T>requantize(temp);
+  result.requantize(temp);
 }
 
 template <typename T>
@@ -271,7 +298,7 @@ inline void outer_product(
     }
   }
 
-  out.<T>requantize(temp);
+  out.requantize(temp);
 }
 
 template <typename T>
@@ -290,7 +317,7 @@ inline void sum_along_last_dim(
     temp[i] = val;
   }
 
-  result.<T>requantize(temp);
+  result.requantize(temp);
 }
 
 #endif // MATH_HPP
