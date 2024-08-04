@@ -2,6 +2,8 @@
 #define MATH_HPP
 
 #include "tensor.hpp"
+#include <cmath>
+#include <algorithm>
 
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the model
@@ -188,8 +190,8 @@ inline void broadcast_multiply(
 
 template <typename T>
 inline void elementwise_multiply(EnhancedTensor<T>& result, 
-                                 const Tensor2D<T>& matrix1, 
-                                 const Tensor2D<T>& matrix2,
+                                 const Tensor<T>& matrix1,
+                                 const Tensor<T>& matrix2,
                                  float* tempbuf,
                                  int total_elements) {
   EnhancedTensor<float> temp(tempbuf, total_elements);

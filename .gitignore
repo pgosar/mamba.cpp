@@ -2,7 +2,7 @@ build/
 builddir/
 vcpkg_installed/
 .cache/
-env/
+venv/
 models/
 .vscode/
 vcpkg/

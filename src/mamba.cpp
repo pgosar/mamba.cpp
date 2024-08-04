@@ -2,12 +2,12 @@
 
 #include <fcntl.h>
 #include <iostream>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
-#include <time.h>
+#include <ctime>
 #include <unistd.h>
 #include <vector>
 
@@ -31,6 +31,7 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   EnhancedTensor<T>& dA = s->dA; // (d_inner, d_state)
   EnhancedTensor<T>& dB = s->dB; // (d_inner, d_state)
   EnhancedTensor<T>& y = s->y;   // (d_inner)
+  float* const tempbuf = s->dequantized_buffer;
 
   // conv_state, ssm_state = self._get_states_from_cache(inference_params)
   EnhancedTensor<T> conv_state = s->conv_state.layer(l);
@@ -40,7 +41,7 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // (2*d_inner, dim), xz (2*d_inner)
   EnhancedTensor<T> layer_weight = w->in_proj.layer(l);
   matmul(s->xz, hidden_state, layer_weight,
-    s->dequantized_buffer,
+    tempbuf,
     2 * d_inner, dim);
   // x, z = xz.chunk(2, dim=-1)
   EnhancedTensor<T>& x = s->xz;           // x (d_inner)
@@ -51,12 +52,13 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // shift_matrix_left(conv_state, d_inner, d_conv);
   // conv_state[:, -1] = x
   // update_last_column(conv_state, x, d_inner, d_conv);
-  shift_left_and_update_last(conv_state, x, d_inner, d_conv);
+  shift_left_and_update_last(conv_state, x, tempbuf, d_inner, d_conv);
 
   // x = torch.sum(conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w"),
   // dim=-1)
   elementwise_multiply(s->temp, conv_state,
-                       w->conv1d_weight + l * d_inner * d_conv,
+                       w->conv1d_weight.layer_ref(l),
+                       tempbuf,
                        d_inner * d_conv);
   sum_along_last_dim(x, s->temp, d_inner, d_conv);
   // x = x + self.conv1d.bias
@@ -166,11 +168,11 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
 
 template <typename T>
 void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
-              std::string prompt, int steps, UserConfig userConfig) {
+              std::string& prompt, const int steps, UserConfig userConfig) {
   // encode the (string) prompt into tokens sequence
   int num_prompt_tokens = 0;
-  int *prompt_tokens = (int *)malloc((prompt.length() + 3) *
-                                     sizeof(int)); // +3 for '\0', BOS, EOS
+  const auto prompt_tokens = static_cast<int*>(malloc((prompt.length() + 3) *
+                                     sizeof(int))); // +3 for '\0', BOS, EOS
   encode(tokenizer, prompt, 0, 0, prompt_tokens, &num_prompt_tokens);
   if (num_prompt_tokens < 1) {
     fprintf(stderr, "something is wrong, expected at least 1 prompt token\n");
@@ -255,10 +257,10 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
   free(prompt_tokens);
 }
 
-void read_stdin(const char *guide, char *buffer, size_t bufsize) {
+void read_stdin(const char *guide, char *buffer, const size_t bufsize) {
   // read a line from stdin, up to but not including \n
   printf("%s", guide);
-  if (fgets(buffer, bufsize, stdin) != NULL) {
+  if (fgets(buffer, bufsize, stdin) != nullptr) {
     size_t len = strlen(buffer);
     if (len > 0 && buffer[len - 1] == '\n') {
       buffer[len - 1] = '\0'; // strip newline
@@ -296,7 +298,7 @@ void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
       // get the (optional) system prompt at position 0
       if (pos == 0) {
         // at position 0, the user can also contribute a system prompt
-        if (cli_system_prompt == NULL) {
+        if (cli_system_prompt == nullptr) {
           // system prompt was not passed in, attempt to get it from stdin
           read_stdin("Enter system prompt (optional): ", system_prompt,
                      sizeof(system_prompt));

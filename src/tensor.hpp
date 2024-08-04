@@ -2,6 +2,7 @@
 #define TENSOR_HPP
 
 #include <cfloat>
+#include <concepts>
 
 // tensors
 template <typename T>
@@ -14,8 +15,6 @@ class TensorBase {
 
 template <Number T>
 class Tensor : TensorBase<T>{
-  friend class SubTensor;
-
 protected:
   float _scale;      //for dequantization
   float _zeropoint;  //^
@@ -138,8 +137,6 @@ public:
 */
 template <Number T>
 class EnhancedTensor : public Tensor<T> {
-  friend class SubTensor;
-
 private:
   size_t _len;
 
@@ -254,6 +251,141 @@ public:
   }
 };
 
+
+template <Number T>
+class SubTensor {
+private:
+  float* _scale_ptr;
+  float* _zeropoint_ptr;
+  T* _data;
+  size_t _len;
+
+public:
+  SubTensor(float* scale_ptr, float* zeropoint_ptr, T* data, size_t len) :
+    _scale_ptr(scale_ptr), _zeropoint_ptr(zeropoint_ptr), _data(data), _len(len)
+  {}
+
+  SubTensor(EnhancedTensor<T>& source, size_t offset) :
+    _scale_ptr(&source._scale),
+    _zeropoint_ptr(&source._zeropoint),
+    _data(source._data + offset),
+    _len(source._len)
+  {}
+
+  //Move
+  SubTensor(SubTensor<T>&& other) noexcept :
+    _scale_ptr(std::exchange(other._scale_ptr, nullptr)),
+    _zeropoint_ptr(std::exchange(other._zeropoint_ptr, nullptr)),
+    _data(std::exchange(other._data, nullptr)),
+    _len(std::exchange(other._len, 0))
+  {}
+
+  SubTensor<T>& operator=(SubTensor<T>&& other) noexcept
+  {
+    _scale_ptr = std::exchange(other._scale_ptr, nullptr);
+    _zeropoint_ptr = std::exchange(other._zeropoint_ptr, nullptr);
+    _data = std::exchange(other._data, nullptr);
+    _len = std::exchange(other._len, 0);
+    return *this;
+  }
+
+  //Copy (Shallow, this tensor is effectively a 1D reference into a 2D tensor)
+  SubTensor(SubTensor<T> const& other) :
+    _scale_ptr(other._scale_ptr),
+    _zeropoint_ptr(other._zeropoint_ptr),
+    _data(other._data),
+    _len(other._len)
+  {}
+
+  SubTensor<T>& operator=(SubTensor<T> const& other)
+  {
+    _scale_ptr = other._scale_ptr;
+    _zeropoint_ptr = other._zeropoint_ptr;
+    _data = other._data;
+    _len = other._len;
+
+    return *this;
+  }
+
+  //No destructor other than default; this tensor does not own any of its pointers
+  ~SubTensor() = default;
+
+  template<typename X=T,
+  std::enable_if_t<!std::is_same<X,float>::value>>
+  inline float dequantize(size_t i) const {
+    return (static_cast<float>(_data[i]) - *_zeropoint_ptr) / *_scale_ptr;
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same<X,float>::value>>
+  inline float dequantize(size_t i) const {
+    return _data[i];
+  }
+
+    template<typename X=T,
+  std::enable_if_t<!std::is_same_v<X,float>>>
+  float operator[](size_t i) const {
+    return dequantize<T>(i);
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same_v<X,float>>>
+  float& operator[](size_t i) {
+    return _data[i];
+  }
+
+  const T* data() const {
+    return const_cast<T*>(data);
+  }
+
+  T get(size_t i) const {
+    return this->_data[i];
+  }
+
+  void set(size_t i, T d) {
+    this->_data[i] = d;
+  }
+
+  template<typename X=T,
+  std::enable_if_t<!std::is_same_v<X,float>>>
+  void requantize(EnhancedTensor<float>& t) {
+    float max = FLT_MAX;
+    float min = -FLT_MAX;
+    T* other_data = t.data();
+    for(int i = 0; i < _len; i++) {
+      max = std::max(other_data[i], max);
+      min = std::min(other_data[i], min);
+    }
+
+    float x_range = max - min;
+    x_range = x_range == 0 ? 1 : x_range;
+
+    constexpr T T_MAX = 1 << (sizeof(T)-1);
+
+    float scale = (2.0 * T_MAX) / x_range;
+    float zeropoint = std::round(-scale * min - T_MAX);
+
+    for(int i = 0; i < _len; i++) {
+      float converted = other_data[i] * scale + zeropoint;
+      if (converted > T_MAX - 1) _data[i] = T_MAX-1;
+      else if (converted < -T_MAX) _data[i] = -T_MAX;
+      else _data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+    }
+
+    *_scale_ptr = scale;
+    *_zeropoint_ptr = zeropoint;
+
+    t.detach();
+  }
+
+  template<typename X=T,
+  std::enable_if_t<std::is_same_v<X,float>>>
+  void requantize(EnhancedTensor<float>& t) {
+    memcpy(_data, t.data(), _len);
+    t.detach();
+  }
+};
+
 template <Number T>
 class Tensor2D {
 protected:
@@ -340,12 +472,10 @@ public:
   }
 
   EnhancedTensor<T> layer(const size_t l) {
-    //TODO need to refactor to use pointer to this tensor's scales/zeropoints
     return EnhancedTensor<T>(_scales[l], _zeropoints[l], _data + l * _layer_len, _layer_len);
   }
 
   SubTensor<T> layer_ref(const size_t l) {
-    //TODO need to refactor to use pointer to this tensor's scales/zeropoints
     return SubTensor<T>(_scales + l, _zeropoints + l, _data + l * _layer_len, _layer_len);
   }
 };
@@ -405,140 +535,6 @@ public:
   std::enable_if_t<std::is_same_v<X,float>>>
   void requantize(EnhancedTensor2D<float> &t) {
     //nop, data isn't quantized in the first place
-  }
-};
-
-template <Number T>
-class SubTensor {
-private:
-  float* _scale_ptr;
-  float* _zeropoint_ptr;
-  T* _data;
-  size_t _len;
-
-public:
-  SubTensor(float* scale_ptr, float* zeropoint_ptr, T* data, size_t len) :
-    _scale_ptr(scale_ptr), _zeropoint_ptr(zeropoint_ptr), _data(data), _len(len)
-  {}
-
-  SubTensor(EnhancedTensor<T>& source, size_t offset) :
-    _scale_ptr(&source._scale), 
-    _zeropoint_ptr(&source._zeropoint),
-    _data(source._data + offset),
-    _len(source._len)
-  {}
-
-  //Move
-  SubTensor(SubTensor<T>&& other) noexcept :
-    _scale_ptr(std::exchange(other._scale_ptr, nullptr)), 
-    _zeropoint_ptr(std::exchange(other._zeropoint_ptr, nullptr)),
-    _data(std::exchange(other._data, nullptr)),
-    _len(std::exchange(other._len, 0))
-  {}
-  
-  SubTensor<T>& operator=(SubTensor<T>&& other) noexcept
-  {
-    _scale_ptr = std::exchange(other._scale_ptr, nullptr);
-    _zeropoint_ptr = std::exchange(other._zeropoint_ptr, nullptr);
-    _data = std::exchange(other._data, nullptr);
-    _len = std::exchange(other._len, 0);
-    return *this;
-  }
-
-  //Copy (Shallow, this tensor is effectively a 1D reference into a 2D tensor)
-  SubTensor(SubTensor<T> const& other) :
-    _scale_ptr(other._scale_ptr), 
-    _zeropoint_ptr(other._zeropoint_ptr),
-    _data(other._data),
-    _len(other._len)
-  {}
-  
-  SubTensor<T>& operator=(SubTensor<T> const& other)
-  {
-    _scale_ptr = other._scale_ptr;
-    _zeropoint_ptr = other._zeropoint_ptr;
-    _data = other._data;
-    _len = other._len;
-
-    return *this;
-  }
-
-  //No destructor other than default; this tensor does not own any of its pointers
-  ~SubTensor() = default;
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    return (static_cast<float>(_data[i]) - *_zeropoint_ptr) / *_scale_ptr;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same<X,float>::value>>
-  inline float dequantize(size_t i) const {
-    return _data[i];
-  }
-
-    template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
-  float operator[](size_t i) const {
-    return dequantize<T>(i);
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same_v<X,float>>>
-  float& operator[](size_t i) {
-    return _data[i];
-  }
-
-  const T* data() const {
-    return const_cast<T*>(data);
-  }
-
-  T get(size_t i) const {
-    return this->_data[i];
-  }
-
-  void set(size_t i, T d) {
-    this->_data[i] = d;
-  }
-
-  template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
-  void requantize(EnhancedTensor<float>& t) {
-    float max = FLT_MAX;
-    float min = -FLT_MAX;
-    T* other_data = t.data();
-    for(int i = 0; i < _len; i++) {
-      max = std::max(other_data[i], max);
-      min = std::min(other_data[i], min);
-    }
-
-    float x_range = max - min;
-    x_range = x_range == 0 ? 1 : x_range;
-
-    constexpr T T_MAX = 1 << (sizeof(T)-1); 
-
-    float scale = (2.0 * T_MAX) / x_range;
-    float zeropoint = std::round(-scale * min - T_MAX);
-
-    for(int i = 0; i < _len; i++) {
-      float converted = other_data[i] * scale + zeropoint;
-      if (converted > T_MAX - 1) _data[i] = T_MAX-1;
-      else if (converted < -T_MAX) _data[i] = -T_MAX;
-      else _data[i] = static_cast<T>(converted  + .5 * signbit(converted));
-    }
-
-    *_scale_ptr = scale;
-    *_zeropoint_ptr = zeropoint;
-
-    t.detach();
-  }
-
-  template<typename X=T,
-  std::enable_if_t<std::is_same_v<X,float>>>
-  void requantize(EnhancedTensor<float>& t) {
-    memcpy(_data, t.data(), _len);
-    t.detach();
   }
 };
 
