@@ -1,6 +1,8 @@
 #ifndef TENSOR_HPP
 #define TENSOR_HPP
 
+#include <cfloat>
+
 // tensors
 template <typename T>
 concept Number = std::integral<T> || std::floating_point<T>;
@@ -72,7 +74,7 @@ public:
   //will we even have tensors with such high dim anyways?
   template<typename X=T,
   std::enable_if_t<!std::is_same_v<X,float>>>
-  [[nodiscard]] float dequantize(size_t i) const {
+  [[nodiscard]] float dequantize(int i) const {
     return (static_cast<float>(_data[i]) - _zeropoint) / _scale;
   }
 
@@ -95,13 +97,13 @@ public:
   }
 
   template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
+  typename = std::enable_if_t<!std::is_same_v<X,float>>>
   float operator[](size_t i) const {
     return dequantize<T>(i);
   }
 
   template<typename X=T,
-  std::enable_if_t<std::is_same_v<X,float>>>
+  typename = std::enable_if_t<std::is_same_v<X,float>>>
   float& operator[](size_t i) {
     return _data[i];
   }
@@ -314,13 +316,13 @@ public:
   }
 
   template<typename X=T,
-  std::enable_if_t<!std::is_same_v<X,float>>>
+  typename = std::enable_if_t<!std::is_same_v<X,float>>>
   float operator[](size_t i) const {
     return dequantize<T>(i);
   }
 
   template<typename X=T,
-  std::enable_if_t<std::is_same_v<X,float>>>
+  typename = std::enable_if_t<std::is_same_v<X,float>>>
   float& operator[](size_t i) {
     return _data[i];
   }

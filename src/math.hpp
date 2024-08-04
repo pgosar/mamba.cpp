@@ -1,9 +1,6 @@
 #ifndef MATH_HPP
 #define MATH_HPP
 
-#include <math.h>
-#include <cfloat>
-
 #include "tensor.hpp"
 
 // ----------------------------------------------------------------------------
@@ -28,7 +25,7 @@ template <typename T> inline void rmsnorm(
 
   // normalize and scale
   EnhancedTensor<float> temp(tempbuf, size);
-  for (int j = 0; j < size; j++) {
+  for (size_t j = 0; j < size; j++) {
     temp[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
   }
 
@@ -79,16 +76,6 @@ inline void update_last_column(EnhancedTensor2D<T>& matrix, const Tensor<T>& x, 
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
     matrix.set(i * cols + cols - 1, x.get(i));
-  }
-}
-
-template <typename T>
-inline void shift_matrix_left(EnhancedTensor2D<T>& matrix, int rows, int cols) {
-#pragma omp parallel for
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols - 1; j++) {
-      matrix.set(i * cols + j, matrix.get(i * cols + j + 1));
-    }
   }
 }
 
@@ -254,7 +241,7 @@ inline void elementwise_multiply_and_add(
   const Tensor2D<T>& matrix1, 
   const Tensor2D<T>& matrix2,
   const Tensor2D<T>& matrix3, 
-  float* tempbuf, int total_elements) {
+  const float* tempbuf, int total_elements) {
 
   EnhancedTensor2D<float> temp(tempbuf, result._layer_len, result._n_layers);
 
