@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cmath>
 #include <algorithm>
+#include <utility>
 
 // tensors
 template <typename T>
@@ -88,7 +89,7 @@ public:
   template<typename X=T,
   std::enable_if_t<!std::is_same_v<X,float>>>
   inline void quantize(size_t i, float value) const {
-    _data[i] = static_cast<T>(((value * _scale) + _zeropoint) + .5 * signbit(value));
+    _data[i] = static_cast<T>(((value * _scale) + _zeropoint) + .5 * std::signbit(value));
   }
 
   template<typename X=T,
@@ -256,7 +257,7 @@ public:
       float converted = data[i] * this->_scale + this->_zeropoint;
       if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
       else if (converted < -T_MAX) this->_data[i] = -T_MAX;
-      else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+      else this->_data[i] = static_cast<T>(converted  + .5 * std::signbit(converted));
     }
 
     t.detach();  //todo could use std::shared_ptr instead
@@ -291,7 +292,7 @@ public:
       float converted = t[i] * this->_scale + this->_zeropoint;
       if (converted > T_MAX - 1) this->_data[i] = T_MAX-1;
       else if (converted < -T_MAX) this->_data[i] = -T_MAX;
-      else this->_data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+      else this->_data[i] = static_cast<T>(converted  + .5 * std::signbit(converted));
     }
   }
 
@@ -439,7 +440,7 @@ public:
       float converted = other_data[i] * scale + zeropoint;
       if (converted > T_MAX - 1) _data[i] = T_MAX-1;
       else if (converted < -T_MAX) _data[i] = -T_MAX;
-      else _data[i] = static_cast<T>(converted  + .5 * signbit(converted));
+      else _data[i] = static_cast<T>(converted  + .5 * std::signbit(converted));
     }
 
     *_scale_ptr = scale;
@@ -478,8 +479,22 @@ public:
   {}
 
   //Move
-  Tensor2D(Tensor2D<T>&& other) = default;
-  Tensor2D<T>& operator=(Tensor2D<T>&&) = default;
+  Tensor2D(Tensor2D<T>&& other) noexcept :
+    _scales(std::exchange(other._scales, nullptr)),
+    _zeropoints(std::exchange(other._zeropoints, nullptr)),
+    _layer_len(std::exchange(other._layer_len, 0.0f)),
+    _data(std::exchange(other._data, nullptr))
+  {}
+
+  Tensor2D<T>& operator=(Tensor2D<T>&& other) noexcept {
+    if(&other == this) return *this;
+
+    _scales = std::exchange(other._scales, nullptr);
+    _zeropoints = std::exchange(other._zeropoints, nullptr);
+    _layer_len = std::exchange(other._layer_len, 0.0f);
+    _data = std::exchange(other._data, nullptr);
+    return *this;
+  }
 
   ~Tensor2D() {
     delete _data;
@@ -508,7 +523,7 @@ public:
   void quantize(size_t i, const float value) const {
     float scale = _scales[i / _layer_len];
     float zeropoint = _zeropoints[i / _layer_len];
-    _data[i] = static_cast<T>(((value * scale) + zeropoint) + .5 * signbit(value));
+    _data[i] = static_cast<T>(((value * scale) + zeropoint) + .5 * std::signbit(value));
   }
 
   template<typename X=T,
@@ -601,7 +616,7 @@ public:
         float converted = dequantized_layer[i] * this->_scales[l] + this->_zeropoints[l];
         if (converted > T_MAX - 1) layer[i] = T_MAX-1;
         else if (converted < -T_MAX) layer[i] = -T_MAX;
-        else layer[i] = static_cast<T>(converted  + .5 * signbit(converted));
+        else layer[i] = static_cast<T>(converted  + .5 * std::signbit(converted));
       }
     }
   }

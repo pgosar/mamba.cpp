@@ -88,6 +88,9 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
   w->token_embedding_table = Tensor<T>(ptr);
   ptr += p->rounded_vocab_size * p->dim;
 
+  //TODO need to read scales and zeropoints
+  //VERY BIG TODO
+
   w->in_proj = Tensor2D<T>(ptr, (2 * p->d_inner) * p->dim);
   ptr += n_layers * (2 * p->d_inner) * p->dim;
 
