@@ -57,12 +57,12 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // x = torch.sum(conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w"),
   // dim=-1)
   elementwise_multiply(s->temp, conv_state,
-                       w->conv1d_weight.layer_ref(l),
+                       w->conv1d_weight.layer(l),
                        tempbuf,
                        d_inner * d_conv);
-  sum_along_last_dim(x, s->temp, d_inner, d_conv);
+  sum_along_last_dim(x, s->temp, tempbuf, d_inner, d_conv);
   // x = x + self.conv1d.bias
-  elementwise_add(x, x, w->conv1d_bias + l * d_inner, d_inner);
+  elementwise_add(x, x, w->conv1d_bias.layer(l), tempbuf, d_inner);
   // x = F.silu(x)
   for (int i = 0; i < d_inner; i++) {
     x[i] = silu(x[i]);
@@ -71,18 +71,18 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // SSM step
 
   // x_db = self.x_proj(x)   # x_db (dt_rank+2*d_state)
-  matmul(s->x_db, x, w->x_proj + l * (dt_rank + 2 * d_state) * d_inner,
+  matmul(s->x_db, x, w->x_proj.layer(l), tempbuf,
          dt_rank + 2 * d_state, d_inner);
   // dt, B, C = torch.split(x_db, [self.dt_rank, self.d_state, self.d_state],
   // dim=-1)
-  T *dt = s->x_db;                    // dt (dt_rank)
-  T *B = s->x_db + dt_rank;           // B  (d_state)
-  T *C = s->x_db + dt_rank + d_state; // C  (d_state)
+  EnhancedTensor<T>& dt = s->x_db;                    // dt (dt_rank)
+  EnhancedTensor<T> B = s->x_db + dt_rank;           // B  (d_state)
+  EnhancedTensor<T> C = s->x_db + dt_rank + d_state; // C  (d_state)
 
   // dt = self.dt_proj(dt)   # dt (dt_rank), dt_proj_weight (d_inner, dt_rank),
   // dt_proj_bias (d_inner)
-  linear(s->dt, dt, w->dt_proj_weight + l * d_inner * dt_rank,
-         w->dt_proj_bias + l * d_inner, d_inner, dt_rank);
+  linear(s->dt, dt, w->dt_proj_weight.layer(l),
+         w->dt_proj_bias.layer(l), tempbuf, d_inner, dt_rank);
   dt = s->dt; // NOTE: dt is now bigger: (d_inner) instead of (dt_rank)
   // dt = F.softplus(dt)
   for (int i = 0; i < d_inner; i++) {
@@ -92,26 +92,26 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   //  Discretize A and B
   // dA = torch.exp(torch.einsum("d,dn->dn", dt, self.A))   # A (d_inner,
   // d_state), dA (d_inner, d_state)
-  broadcast_multiply(dA, dt, w->A + l * d_inner * d_state, d_inner, d_state);
+  broadcast_multiply(dA, dt, w->A.layer(l), tempbuf, d_inner, d_state);
   for (int i = 0; i < d_inner * d_state; i++) {
     dA[i] = expf(dA[i]);
   }
   // dB = torch.einsum("d,n->dn", dt, B)    # dt (d_inner), B (d_state), dB
   // (d_inner, d_state)
-  outer_product(dB, dt, B, d_inner, d_state);
+  outer_product(dB, dt, B, tempbuf, d_inner, d_state);
 
   //  Update ssm_state
   // ssm_state.copy_(ssm_state * dA + rearrange(x, "d -> d 1") * dB)
-  broadcast_multiply(s->temp, x, dB, d_inner, d_state);
-  elementwise_multiply_and_add(ssm_state, ssm_state, dA, s->temp,
+  broadcast_multiply(s->temp, x, dB, tempbuf, d_inner, d_state);
+  elementwise_multiply_and_add(ssm_state, ssm_state, dA, s->temp, tempbuf,
                                d_inner * d_state);
 
   //  Compute y
   // y = torch.einsum("dn,n->d", ssm_state, C) # ssm_state (d_inner, d_state), C
   // (d_state), y (d_inner)
-  rowwise_dot_product(y, ssm_state, C, d_inner, d_state);
+  rowwise_dot_product(y, ssm_state, C, tempbuf, d_inner, d_state);
   // y = y + self.D * x
-  elementwise_multiply_and_add(y, w->D + l * d_inner, x, y, d_inner);
+  elementwise_multiply_and_add(y, w->D.layer(l), x, y, tempbuf, d_inner);
 
   // y = y * F.silu(z)  # (d_inner)
   for (int i = 0; i < d_inner; i++) {
@@ -121,7 +121,7 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
 
   // hidden_state = self.out_proj(y)  # out_proj (dim, d_inner), hidden_state
   // (dim)
-  matmul(hidden_state, y, w->out_proj + l * dim * d_inner, dim, d_inner);
+  matmul(hidden_state, y, w->out_proj.layer(l), tempbuf, dim, d_inner);
 }
 
 template <typename T> T *forward(Mamba<T> *mamba, int token) {

@@ -96,9 +96,15 @@ public:
   }
 
   template<typename X=T,
-  typename = std::enable_if_t<!std::is_same_v<X,float>>>
+  std::enable_if_t<!std::is_same_v<X,float>>>
   float operator[](size_t i) const {
     return dequantize<T>(i);
+  }
+
+  template<typename X=T,
+  typename = std::enable_if_t<std::is_same_v<X,float>>>
+  const float& operator[](size_t i) const {
+    return _data[i];
   }
 
   template<typename X=T,
@@ -145,7 +151,7 @@ public:
     Tensor<T>(scale, zeropoint, data), _len(len)
   {}
 
-  EnhancedTensor(T* data, size_t len) :
+  EnhancedTensor(const T* data, size_t len) :
     Tensor<T>(data), _len(len)
   {}
 
@@ -248,6 +254,11 @@ public:
 
   [[nodiscard]] size_t len() const {
     return _len;
+  }
+
+  EnhancedTensor<T> operator+(const size_t off) {
+    return EnhancedTensor<T>(this->_scale, this->_zeropoint,
+							this->_data + off, _len - off);
   }
 };
 

@@ -31,7 +31,7 @@ template <typename T> inline void rmsnorm(
     temp[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
   }
 
-  o.requantize(temp);
+  o.<T>requantize(temp);
 }
 
 template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int size) {
@@ -54,7 +54,7 @@ template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int 
     temp[i] /= sum;
   }
 
-  x.requantize(temp);
+  x.<T>requantize(temp);
 }
 
 inline float softplus(float x) { return logf(1.0f + expf(x)); }
@@ -86,7 +86,7 @@ inline void shift_left_and_update_last(
   EnhancedTensor<T>& matrix, 
   const Tensor<T>& x, 
   float* tempbuf, int rows, int cols) {
-  EnhancedTensor<float> temp = matrix.dequantize(tempbuf, rows * cols);
+  EnhancedTensor<float> temp = matrix.<T>dequantize(tempbuf, rows * cols);
 
 #pragma omp parallel for
   for (int i = 0; i < rows; i++) {
@@ -96,13 +96,13 @@ inline void shift_left_and_update_last(
     temp[i * cols + cols - 1] = x[i];
   }
 
-  matrix.requantize(temp);
+  matrix.<T>requantize(temp);
 }
 
 template <typename T>
 inline void rowwise_dot_product(
   EnhancedTensor<T>& out, 
-  const Tensor2D<T>& matrix, 
+  const Tensor<T>& matrix,
   const Tensor<T>& weights, 
   float* tempbuf,
   int rows,
@@ -121,7 +121,7 @@ EnhancedTensor<float> temp(tempbuf, rows);
     temp[i] = val;
   }
 
-  out.requantize(temp);
+  out.<T>requantize(temp);
 }
 
 //TODO optimize
@@ -144,7 +144,7 @@ template <typename T> inline void matmul(
     temp[i] = val;
   }
 
-  xout.requantize(temp);
+  xout.<T>requantize(temp);
 }
 
 template <typename T>
@@ -165,7 +165,7 @@ inline void linear(EnhancedTensor<T>& xout,
     temp[i] = val + b[i];
   }
 
-  xout.requantize(temp);
+  xout.<T>requantize(temp);
 }
 
 template <typename T>
@@ -185,7 +185,7 @@ inline void broadcast_multiply(
     }
   }
 
-  out.requantize(temp);
+  out.<T>requantize(temp);
 }
 
 template <typename T>
@@ -201,14 +201,14 @@ inline void elementwise_multiply(EnhancedTensor<T>& result,
     temp[i] = matrix1[i] * matrix2[i];
   }
 
-  result.requantize(temp);
+  result.<T>requantize(temp);
 }
 
 template <typename T>
 inline void elementwise_add(
   EnhancedTensor<T>& result, 
-  const Tensor2D<T>& matrix1, 
-  const Tensor2D<T>& matrix2,
+  const Tensor<T>& matrix1,
+  const Tensor<T>& matrix2,
   float* tempbuf, int total_elements) {
   EnhancedTensor<float> temp(tempbuf, total_elements);
 
@@ -217,7 +217,7 @@ inline void elementwise_add(
     temp[i] = matrix1[i] + matrix2[i];
   }
 
-  result.requantize(temp);
+  result.<T>requantize(temp);
 }
 
 template <typename T>
@@ -234,25 +234,25 @@ inline void elementwise_multiply_and_add(
     temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
 
-  result.requantize(temp);
+  result.<T>requantize(temp);
 }
 
 template <typename T>
 inline void elementwise_multiply_and_add(
-  EnhancedTensor2D<T>& result, 
-  const Tensor2D<T>& matrix1, 
-  const Tensor2D<T>& matrix2,
-  const Tensor2D<T>& matrix3, 
+  EnhancedTensor<T>& result,
+  const Tensor<T>& matrix1,
+  const Tensor<T>& matrix2,
+  const Tensor<T>& matrix3,
   const float* tempbuf, int total_elements) {
 
-  EnhancedTensor2D<float> temp(tempbuf, result._layer_len, result._n_layers);
+  EnhancedTensor<float> temp(tempbuf, result.len());
 
 #pragma omp parallel for
   for (int i = 0; i < total_elements; i++) {
     temp[i] = matrix1[i] * matrix2[i] + matrix3[i];
   }
 
-  result.requantize(temp);
+  result.<T>requantize(temp);
 }
 
 template <typename T>
@@ -271,7 +271,7 @@ inline void outer_product(
     }
   }
 
-  out.requantize(temp);
+  out.<T>requantize(temp);
 }
 
 template <typename T>
@@ -290,7 +290,7 @@ inline void sum_along_last_dim(
     temp[i] = val;
   }
 
-  result.requantize(temp);
+  result.<T>requantize(temp);
 }
 
 #endif // MATH_HPP
