@@ -1,8 +1,7 @@
-project('fast_mamba_inference', 'cpp', version: '0.1.0',
-  default_options: ['cpp_std=c++20', 'warning_level=3'])
+project('fast-mamba-inference', 'cpp',
+        version : '1.0.0',
+        default_options : ['warning_level=3', 'cpp_std=c++20'])
 
-cc = meson.get_compiler('cpp')
-m_dep = cc.find_library('m', required : false)
+fast_mamba_inference = executable('fast_mamba_inference', 'main.cpp', install : true)
 
-sources = files(['src/mamba.cpp', 'src/mamba.hpp', 'src/math.hpp', 'src/util.hpp', 'src/tokenizer.hpp'])
-executable('mamba', sources)
+test('test', fast_mamba_inference)

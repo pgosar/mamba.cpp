@@ -22,34 +22,37 @@
 // header files change all the char arrays to std::strings
 
 template <typename T>
-void forward_layer(Mamba<T> *mamba, size_t l, T *hidden_state) {
+void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   Config *p = &mamba->config;
   MambaWeights<T> *w = &mamba->weights;
   RunState<T> *s = &mamba->state;
   int dim = p->dim, d_inner = p->d_inner, d_conv = p->d_conv,
       d_state = p->d_state, dt_rank = p->dt_rank;
-  T *dA = s->dA; // (d_inner, d_state)
-  T *dB = s->dB; // (d_inner, d_state)
-  T *y = s->y;   // (d_inner)
+  EnhancedTensor<T>& dA = s->dA; // (d_inner, d_state)
+  EnhancedTensor<T>& dB = s->dB; // (d_inner, d_state)
+  EnhancedTensor<T>& y = s->y;   // (d_inner)
 
   // conv_state, ssm_state = self._get_states_from_cache(inference_params)
-  T *conv_state = s->conv_state + l * d_inner * d_conv;
-  T *ssm_state = s->ssm_state + l * d_inner * d_state;
+  EnhancedTensor<T> conv_state = s->conv_state.layer(l);
+  EnhancedTensor<T> ssm_state = s->ssm_state.layer(l);
 
   // xz = self.in_proj(hidden_states)  # hidden_states: (dim), in_proj
   // (2*d_inner, dim), xz (2*d_inner)
-  matmul(s->xz, hidden_state, w->in_proj + l * 2 * d_inner * dim, 2 * d_inner,
-         dim);
+  EnhancedTensor<T> layer_weight = w->in_proj.layer(l);
+  matmul(s->xz, hidden_state, layer_weight,
+    s->dequantized_buffer,
+    2 * d_inner, dim);
   // x, z = xz.chunk(2, dim=-1)
-  T *x = s->xz;           // x (d_inner)
-  T *z = s->xz + d_inner; // z (d_inner)
+  EnhancedTensor<T>& x = s->xz;           // x (d_inner)
 
   // Conv step
 
   // conv_state.copy_(torch.roll(conv_state, shifts=-1, dims=-1))
-  shift_matrix_left(conv_state, d_inner, d_conv);
+  // shift_matrix_left(conv_state, d_inner, d_conv);
   // conv_state[:, -1] = x
-  update_last_column(conv_state, x, d_inner, d_conv);
+  // update_last_column(conv_state, x, d_inner, d_conv);
+  shift_left_and_update_last(conv_state, x, d_inner, d_conv);
+
   // x = torch.sum(conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w"),
   // dim=-1)
   elementwise_multiply(s->temp, conv_state,
@@ -107,9 +110,11 @@ void forward_layer(Mamba<T> *mamba, size_t l, T *hidden_state) {
   rowwise_dot_product(y, ssm_state, C, d_inner, d_state);
   // y = y + self.D * x
   elementwise_multiply_and_add(y, w->D + l * d_inner, x, y, d_inner);
+
   // y = y * F.silu(z)  # (d_inner)
   for (int i = 0; i < d_inner; i++) {
-    y[i] = y[i] * silu(z[i]);
+    int j = i + d_inner;
+    y[i] = y[i] * silu(x[j]); //x[j] == 
   }
 
   // hidden_state = self.out_proj(y)  # out_proj (dim, d_inner), hidden_state
@@ -123,16 +128,16 @@ template <typename T> T *forward(Mamba<T> *mamba, int token) {
   MambaWeights<T> *w = &mamba->weights;
   RunState<T> *s = &mamba->state;
   int dim = p->dim;
-  T *input = s->input;
-  T *hidden_state = s->hidden_state;
+  T* input_data = s->input.data();
+  EnhancedTensor<T>& hidden_state = s->hidden_state;
 
   // copy the token embedding into x
   const T *content_row = w->token_embedding_table + token * dim;
-  memcpy(input, content_row, dim * sizeof(T));
+  memcpy(input_data, content_row, dim * sizeof(T));
 
   Tensor<T> inputTensor(w->token_embedding_table.scale(), 
                         w->token_embedding_table.zeropoint(),
-                        input);
+                        input_data);
 
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {

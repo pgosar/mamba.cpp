@@ -44,6 +44,10 @@ template <typename T> inline void malloc_run_state(RunState<T> *s, Config *p) {
     // internal state, separate memory for each layer
     s->conv_state = allocateTensor2D<T>(p->d_inner * p->d_conv, p->n_layers);
     s->ssm_state = allocateTensor2D<T>(p->d_inner * p->d_state, p->n_layers);
+
+    s->dequantized_buffer = static_cast<float*>(
+      malloc(p->longest_tensor_len * sizeof(float))
+    );
   } catch (std::bad_alloc &e) {
     std::cerr << "Memory allocation failed: " << e.what() << std::endl;
     std::exit(EXIT_FAILURE);

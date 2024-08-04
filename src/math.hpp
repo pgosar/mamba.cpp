@@ -83,6 +83,34 @@ inline void update_last_column(EnhancedTensor2D<T>& matrix, const Tensor<T>& x, 
 }
 
 template <typename T>
+inline void shift_matrix_left(EnhancedTensor2D<T>& matrix, int rows, int cols) {
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols - 1; j++) {
+      matrix.set(i * cols + j, matrix.get(i * cols + j + 1));
+    }
+  }
+}
+
+template <typename T>
+inline void shift_left_and_update_last(
+  EnhancedTensor<T>& matrix, 
+  const Tensor<T>& x, 
+  float* tempbuf, int rows, int cols) {
+  EnhancedTensor<float> temp = matrix.dequantize(tempbuf, rows * cols);
+
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols - 1; j++) {
+      temp[i * cols + j] = temp[i * cols + j + 1];
+    }
+    temp[i * cols + cols - 1] = x[i];
+  }
+
+  matrix.requantize(temp);
+}
+
+template <typename T>
 inline void rowwise_dot_product(
   EnhancedTensor<T>& out, 
   const Tensor2D<T>& matrix, 
@@ -127,7 +155,7 @@ template <typename T> inline void matmul(
     temp[i] = val;
   }
 
-  x_out.requantize(temp);
+  xout.requantize(temp);
 }
 
 template <typename T>
