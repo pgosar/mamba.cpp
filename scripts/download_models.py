@@ -39,7 +39,9 @@ def preprocess(
     )
     return tensor, is_activated
 
+
 largest = 0
+
 
 def serialize_fp32(
     file: BinaryIO, tensor: torch.Tensor, is_activated: torch.Tensor, num_bits: int
@@ -74,12 +76,12 @@ def model_export(
             "iiiiiiii",
             config.n_layer,
             config.vocab_size,
-            config.d_model, # was config.hidden_size
+            config.d_model,  # was config.hidden_size
             d_inner,
             dt_rank,
             d_state,
             d_conv,
-            num_bits
+            num_bits,
         )
         _ = f.write(header)
 

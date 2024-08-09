@@ -12,8 +12,6 @@
 #include <unistd.h>
 #include <vector>
 
-#include <boost/dynamic_bitset.hpp>
-
 #include "mamba.hpp"
 
 template <typename T> inline EnhancedTensor<T> allocateTensor(size_t dim) {
@@ -21,7 +19,8 @@ template <typename T> inline EnhancedTensor<T> allocateTensor(size_t dim) {
   return EnhancedTensor<T>(buffer, dim);
 }
 
-template <typename T> inline EnhancedTensor2D<T> allocateTensor2D(size_t dim, size_t n_layers) {
+template <typename T>
+inline EnhancedTensor2D<T> allocateTensor2D(size_t dim, size_t n_layers) {
   T *buffer = static_cast<T *>(calloc(n_layers * dim, sizeof(T)));
   return EnhancedTensor2D<T>(buffer, dim, n_layers);
 }
@@ -45,9 +44,8 @@ template <typename T> inline void malloc_run_state(RunState<T> *s, Config *p) {
     s->conv_state = allocateTensor2D<T>(p->d_inner * p->d_conv, p->n_layers);
     s->ssm_state = allocateTensor2D<T>(p->d_inner * p->d_state, p->n_layers);
 
-    s->dequantized_buffer = static_cast<float*>(
-      malloc(p->longest_tensor_len * sizeof(float))
-    );
+    s->dequantized_buffer =
+        static_cast<float *>(malloc(p->longest_tensor_len * sizeof(float)));
   } catch (std::bad_alloc &e) {
     std::cerr << "Memory allocation failed: " << e.what() << std::endl;
     std::exit(EXIT_FAILURE);
@@ -65,18 +63,18 @@ template <typename T> inline void reset_internal_state(Mamba<T> *mamba) {
 }
 
 template <typename T> inline void free_run_state(RunState<T> *s) {
-  //delete s->input;
-  //delete s->hidden_state;
-  //delete s->xz;
-  //delete s->x_db;
-  //delete s->dt;
-  //delete s->dA;
-  //delete s->dB;
-  //delete s->temp;
-  //delete s->y;
-  //delete s->logits;
-  //delete s->conv_state;
-  //delete s->ssm_state;
+  // delete s->input;
+  // delete s->hidden_state;
+  // delete s->xz;
+  // delete s->x_db;
+  // delete s->dt;
+  // delete s->dA;
+  // delete s->dB;
+  // delete s->temp;
+  // delete s->y;
+  // delete s->logits;
+  // delete s->conv_state;
+  // delete s->ssm_state;
 }
 
 template <typename T>
@@ -88,8 +86,8 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
   w->token_embedding_table = Tensor<T>(ptr);
   ptr += p->rounded_vocab_size * p->dim;
 
-  //TODO need to read scales and zeropoints
-  //VERY BIG TODO
+  // TODO need to read scales and zeropoints
+  // VERY BIG TODO
 
   w->in_proj = Tensor2D<T>(ptr, (2 * p->d_inner) * p->dim);
   ptr += n_layers * (2 * p->d_inner) * p->dim;
@@ -133,7 +131,7 @@ inline void memory_map_weights(MambaWeights<T> *w, Config *p, T *ptr) {
 
 template <typename T>
 inline Tensor<T> quantized_to_float_tensor(size_t dim, uint8_t num_bits,
-                                    uint8_t **ptr_to_ptr) {
+                                           uint8_t **ptr_to_ptr) {
   uint8_t *ptr = *ptr_to_ptr;
   T *tensor_data = (T *)malloc(dim * sizeof(T));
 
@@ -156,11 +154,12 @@ inline Tensor<T> quantized_to_float_tensor(size_t dim, uint8_t num_bits,
 
 template <typename T>
 inline Tensor2D<T> quantized_to_float_tensor(size_t dim, uint8_t num_bits,
-                                    uint8_t **ptr_to_ptr, int n_layers) {
+                                             uint8_t **ptr_to_ptr,
+                                             int n_layers) {
   uint8_t *ptr = *ptr_to_ptr;
   T *tensor_data = (T *)malloc(n_layers * dim * sizeof(T));
   float *scales = (float *)malloc(n_layers * sizeof(float));
-  float *zeropoints = (float*)malloc(n_layers * sizeof(float));
+  float *zeropoints = (float *)malloc(n_layers * sizeof(float));
 
   // uint8_t val = 0;
   // uint8_t pos = 0;
@@ -200,8 +199,8 @@ inline void memory_map_quantized_weights(MambaWeights<T> *w, Config *p,
       quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr);
 
   tensor_dim = (2 * p->d_inner) * p->dim;
-  w->in_proj =
-      std::move(quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers));
+  w->in_proj = std::move(
+      quantized_to_float_tensor<T>(tensor_dim, p->num_bits, &ptr, n_layers));
 
   tensor_dim = p->d_inner * 1 * p->d_conv;
   w->conv1d_weight =
@@ -249,7 +248,7 @@ inline void memory_map_quantized_weights(MambaWeights<T> *w, Config *p,
 }
 
 template <typename T>
-inline void load_model_file(char *model_path, Config *config,
+inline void load_model_file(std::string model_path, Config *config,
                             MambaWeights<T> *weights, int *fd, T **data,
                             size_t *file_size) {
   std::ifstream file(model_path, std::ios::binary | std::ios::ate);
@@ -280,7 +279,7 @@ inline void load_model_file(char *model_path, Config *config,
 
   // memory map the model weights into the data pointer
   // TODO: check on performance of mmap vs alternatives
-  *fd = open(model_path, O_RDONLY);
+  *fd = open(model_path.c_str(), O_RDONLY);
   if (*fd == -1) {
     std::cerr << "open failed!" << std::endl;
     std::exit(EXIT_FAILURE);
@@ -302,7 +301,8 @@ inline void load_model_file(char *model_path, Config *config,
   }
 }
 
-template <typename T> inline void load_model(Mamba<T> *m, char *model_path) {
+template <typename T>
+inline void load_model(Mamba<T> *m, std::string model_path) {
   // read the Config and the Weights from the model file
   load_model_file(model_path, &m->config, &m->weights, &m->fd, &m->data,
                   &m->file_size);
@@ -335,7 +335,8 @@ inline long time_in_ms() {
 // -------------------
 // minimize repetition
 template <typename T>
-inline void apply_repetition_penalty(EnhancedTensor<T>& logits, std::vector<int> &prev_tokens,
+inline void apply_repetition_penalty(EnhancedTensor<T> &logits,
+                                     std::vector<int> &prev_tokens,
                                      float penalty) {
   if (penalty == 1.0)
     return;

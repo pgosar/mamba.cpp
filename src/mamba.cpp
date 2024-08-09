@@ -1,16 +1,17 @@
 /* Inference for Mamba model in pure C */
 
-#include <fcntl.h>
-#include <iostream>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <sys/mman.h>
 #include <ctime>
+#include <fcntl.h>
+#include <iostream>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
 
+#include "args.hxx"
 #include "flash_mem.hpp"
 #include "mamba.hpp"
 #include "math.hpp"
@@ -21,16 +22,16 @@
 // header files change all the char arrays to std::strings
 
 template <typename T>
-void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
+void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T> &hidden_state) {
   Config *p = &mamba->config;
   MambaWeights<T> *w = &mamba->weights;
   RunState<T> *s = &mamba->state;
   int dim = p->dim, d_inner = p->d_inner, d_conv = p->d_conv,
       d_state = p->d_state, dt_rank = p->dt_rank;
-  EnhancedTensor<T>& dA = s->dA; // (d_inner, d_state)
-  EnhancedTensor<T>& dB = s->dB; // (d_inner, d_state)
-  EnhancedTensor<T>& y = s->y;   // (d_inner)
-  float* const tempbuf = s->dequantized_buffer;
+  EnhancedTensor<T> &dA = s->dA; // (d_inner, d_state)
+  EnhancedTensor<T> &dB = s->dB; // (d_inner, d_state)
+  EnhancedTensor<T> &y = s->y;   // (d_inner)
+  float *const tempbuf = s->dequantized_buffer;
 
   // conv_state, ssm_state = self._get_states_from_cache(inference_params)
   EnhancedTensor<T> conv_state = s->conv_state.layer(l);
@@ -39,13 +40,11 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // xz = self.in_proj(hidden_states)  # hidden_states: (dim), in_proj
   // (2*d_inner, dim), xz (2*d_inner)
   EnhancedTensor<T> layer_weight = w->in_proj.layer(l);
-  matmul(s->xz, hidden_state, layer_weight,
-    tempbuf,
-    2 * d_inner, dim);
+  matmul(s->xz, hidden_state, layer_weight, tempbuf, 2 * d_inner, dim);
   // x, z = xz.chunk(2, dim=-1)
-  EnhancedTensor<T> x = s->xz.subset(0,d_inner);           // x (d_inner)
-  //TODO do we need to update the scale/zeropoint of the superset tensor?
-  //or are they requantized before the read anyways...?
+  EnhancedTensor<T> x = s->xz.subset(0, d_inner); // x (d_inner)
+  // TODO do we need to update the scale/zeropoint of the superset tensor?
+  // or are they requantized before the read anyways...?
 
   // Conv step
 
@@ -57,9 +56,7 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
 
   // x = torch.sum(conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w"),
   // dim=-1)
-  elementwise_multiply(s->temp, conv_state,
-                       w->conv1d_weight.layer(l),
-                       tempbuf,
+  elementwise_multiply(s->temp, conv_state, w->conv1d_weight.layer(l), tempbuf,
                        d_inner * d_conv);
   sum_along_last_dim(x, s->temp, tempbuf, d_inner, d_conv);
   // x = x + self.conv1d.bias
@@ -70,18 +67,18 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   // SSM step
 
   // x_db = self.x_proj(x)   # x_db (dt_rank+2*d_state)
-  matmul(s->x_db, x, w->x_proj.layer(l), tempbuf,
-         dt_rank + 2 * d_state, d_inner);
+  matmul(s->x_db, x, w->x_proj.layer(l), tempbuf, dt_rank + 2 * d_state,
+         d_inner);
   // dt, B, C = torch.split(x_db, [self.dt_rank, self.d_state, self.d_state],
   // dim=-1)
-  EnhancedTensor<T>& dt = s->x_db;                    // dt (dt_rank)
+  EnhancedTensor<T> &dt = s->x_db;                   // dt (dt_rank)
   EnhancedTensor<T> B = s->x_db + dt_rank;           // B  (d_state)
   EnhancedTensor<T> C = s->x_db + dt_rank + d_state; // C  (d_state)
 
   // dt = self.dt_proj(dt)   # dt (dt_rank), dt_proj_weight (d_inner, dt_rank),
   // dt_proj_bias (d_inner)
-  linear(s->dt, dt, w->dt_proj_weight.layer(l),
-         w->dt_proj_bias.layer(l), tempbuf, d_inner, dt_rank);
+  linear(s->dt, dt, w->dt_proj_weight.layer(l), w->dt_proj_bias.layer(l),
+         tempbuf, d_inner, dt_rank);
   dt = s->dt; // NOTE: dt is now bigger: (d_inner) instead of (dt_rank)
   // dt = F.softplus(dt)
   softplus(dt, tempbuf);
@@ -120,29 +117,28 @@ void forward_layer(Mamba<T> *mamba, size_t l, EnhancedTensor<T>& hidden_state) {
   s->ssm_state.update_layer(l, ssm_state);
 }
 
-template <typename T> EnhancedTensor<T>& forward(Mamba<T> *mamba, int token) {
+template <typename T> EnhancedTensor<T> &forward(Mamba<T> *mamba, int token) {
   // a few convenience variables
   Config *p = &mamba->config;
   MambaWeights<T> *w = &mamba->weights;
   RunState<T> *s = &mamba->state;
   int dim = p->dim;
-  T* input_data = s->input.data();
-  EnhancedTensor<T>& hidden_state = s->hidden_state;
-  T* hidden_state_data = hidden_state.data();
+  T *input_data = s->input.data();
+  EnhancedTensor<T> &hidden_state = s->hidden_state;
+  T *hidden_state_data = hidden_state.data();
 
   // copy the token embedding into x
   Tensor<T> content_row = w->token_embedding_table + token * dim;
   memcpy(input_data, content_row.data(), dim * sizeof(T));
 
-  Tensor<T> inputTensor(w->token_embedding_table.scale(), 
-                        w->token_embedding_table.zeropoint(),
-                        input_data);
+  Tensor<T> inputTensor(w->token_embedding_table.scale(),
+                        w->token_embedding_table.zeropoint(), input_data);
 
   // forward all the layers
   for (int l = 0; l < p->n_layers; l++) {
     // normalize the input
-    rmsnorm(hidden_state, inputTensor, w->norm.layer(l),
-            s->dequantized_buffer, dim);
+    rmsnorm(hidden_state, inputTensor, w->norm.layer(l), s->dequantized_buffer,
+            dim);
     // forward this layer
     forward_layer(mamba, l, hidden_state);
     // residual connection back into hidden_state
@@ -152,19 +148,19 @@ template <typename T> EnhancedTensor<T>& forward(Mamba<T> *mamba, int token) {
 
     hidden_state.requantize(s->dequantized_buffer);
 
-    for(int i = 0; i < dim; i++) {
+    for (int i = 0; i < dim; i++) {
       // copy hidden_state back into input for the next layer
       input_data[i] = hidden_state_data[i];
     }
   }
 
   // final rmsnorm
-  rmsnorm(hidden_state, hidden_state, w->final_norm,
-          s->dequantized_buffer, dim);
+  rmsnorm(hidden_state, hidden_state, w->final_norm, s->dequantized_buffer,
+          dim);
 
   // classifier into logits
-  matmul(s->logits, hidden_state, w->lm_head,
-         s->dequantized_buffer, p->rounded_vocab_size, p->dim);
+  matmul(s->logits, hidden_state, w->lm_head, s->dequantized_buffer,
+         p->rounded_vocab_size, p->dim);
   return s->logits;
 }
 
@@ -173,11 +169,11 @@ template <typename T> EnhancedTensor<T>& forward(Mamba<T> *mamba, int token) {
 
 template <typename T>
 void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
-              std::string& prompt, const int steps, UserConfig userConfig) {
+              std::string &prompt, int steps, UserConfig userConfig) {
   // encode the (string) prompt into tokens sequence
   int num_prompt_tokens = 0;
-  const auto prompt_tokens = static_cast<int*>(malloc((prompt.length() + 3) *
-                                     sizeof(int))); // +3 for '\0', BOS, EOS
+  const auto prompt_tokens = static_cast<int *>(
+      malloc((prompt.length() + 3) * sizeof(int))); // +3 for '\0', BOS, EOS
   encode(tokenizer, prompt, 0, 0, prompt_tokens, &num_prompt_tokens);
   if (num_prompt_tokens < 1) {
     fprintf(stderr, "something is wrong, expected at least 1 prompt token\n");
@@ -194,13 +190,14 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
   std::vector<int> prev_tokens;
 
   // start the main loop
-  long start = 0;    // used to time our code, only initialized after first iteration
+  long start =
+      0;    // used to time our code, only initialized after first iteration
   int next; // will store the next token in the sequence
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;                  // position in the sequence
   while (pos < steps) {
     // forward the model to get logits for the next token
-    EnhancedTensor<T>& logits = forward(mamba, token);
+    EnhancedTensor<T> &logits = forward(mamba, token);
 
     // advance the state machine
     if (pos < num_prompt_tokens - 1) {
@@ -225,9 +222,9 @@ void generate(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
 
       // Ideal seems to be penalty values slightly less than 1.
 
-      //TODO this is needed, comment back-in after refactor integrity is verified
-      //apply_repetition_penalty(logits, prev_tokens,
-      //                         userConfig.repetition_penalty);
+      // TODO this is needed, comment back-in after refactor integrity is
+      // verified apply_repetition_penalty(logits, prev_tokens,
+      //                          userConfig.repetition_penalty);
 
       next = sample(sampler, logits, mamba->state.dequantized_buffer);
     }
@@ -282,7 +279,8 @@ void read_stdin(const char *guide, char *buffer, const size_t bufsize) {
 // is not safely implemented, it's more a proof of concept atm.
 template <typename T>
 void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
-          const char *cli_user_prompt, char *cli_system_prompt, int steps) {
+          const char *cli_user_prompt, const char *cli_system_prompt,
+          int steps) {
 
   // buffers for reading the system prompt and user prompt from stdin
   // you'll notice they are soomewhat haphazardly and unsafely set atm
@@ -356,7 +354,7 @@ void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
     }
 
     // forward the model to get logits for the next token
-    EnhancedTensor<T>& logits = forward(mamba, token);
+    EnhancedTensor<T> &logits = forward(mamba, token);
     next = sample(sampler, logits, mamba->state.dequantized_buffer);
     pos++;
 
@@ -380,85 +378,84 @@ void chat(Mamba<T> *mamba, Tokenizer *tokenizer, Sampler *sampler,
 #ifndef TESTING
 
 void error_usage() {
-  fprintf(stderr, "Usage:   run <checkpoint> [options]\n");
-  fprintf(stderr, "Example: run model.bin -n 256 -i \"Once upon a time\"\n");
-  fprintf(stderr, "Options:\n");
-  fprintf(stderr, "  -t <float>  temperature in [0,inf], default 1.0\n");
-  fprintf(stderr, "  -p <float>  p value in top-p (nucleus) sampling in [0,1] "
-                  "default 0.9\n");
-  fprintf(stderr, "  -s <int>    random seed, default time(NULL)\n");
-  fprintf(stderr, "  -n <int>    number of steps to run for, default 256\n");
-  fprintf(stderr, "  -i <string> input prompt\n");
-  fprintf(stderr, "  -z <string> optional path to custom tokenizer\n");
-  fprintf(stderr, "  -m <string> mode: generate|chat, default: generate\n");
-  fprintf(stderr, "  -y <string> (optional) system prompt in chat mode\n");
+  std::cerr << "Usage:   run <checkpoint> [options]\n";
+  std::cerr << "Example: run model.bin -n 256 -i \"Once upon a time\"\n";
+  std::cerr << "Options:\n";
+  std::cerr << "  -t <float>  temperature in [0,inf], default 1.0\n";
+  std::cerr << "  -p <float>  p value in top-p (nucleus) sampling in [0,1] "
+               "default 0.9\n";
+  std::cerr << "  -s <int>    random seed, default time(NULL)\n";
+  std::cerr << "  -n <int>    number of steps to run for, default 256\n";
+  std::cerr << "  -i <string> input prompt\n";
+  std::cerr << "  -z <string> optional path to custom tokenizer\n";
+  std::cerr << "  -m <string> mode: generate|chat, default: generate\n";
+  std::cerr << "  -y <string> (optional) system prompt in chat mode\n";
+  std::cerr << "  --flashmem enable flash memory\n";
+  std::cerr << "  --specdecoding enable speculative decoding\n";
   exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[]) {
 
-  // default parameters
-  char *model_path = NULL; // e.g. out/model.bin
-  std::string tokenizer_path = "models/tokenizer.bin";
-  float temperature =
-      1.0f; // 0.0 = greedy deterministic. 1.0 = original. don't set higher
-  float topp =
-      0.9f; // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
-  int steps = 256;         // number of steps to run for
-  std::string prompt = "";     // prompt string
-  std::string mode = "generate"; // generate|chat
-  char *system_prompt =
-      NULL; // the (optional) system prompt to use in chat mode
+  args::ArgumentParser parser("Run the model with specified options.");
+  args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
+  args::ValueFlag<float> temperatureFlag(
+      parser, "float", "Temperature in [0,inf], default 1.0", {'t'}, 1.0f);
+  args::ValueFlag<float> toppFlag(
+      parser, "float",
+      "P value in top-p (nucleus) sampling in [0,1], default 0.9", {'p'}, 0.9f);
+  args::ValueFlag<int> stepsFlag(
+      parser, "int", "Number of steps to run for, default 256", {'n'}, 256);
+  args::ValueFlag<std::string> promptFlag(parser, "string", "Input prompt",
+                                          {'i'}, "");
+  args::ValueFlag<std::string> tokenizerPathFlag(
+      parser, "string", "Optional path to custom tokenizer", {'z'},
+      "models/tokenizer.bin");
+  args::ValueFlag<std::string> modeFlag(
+      parser, "string", "Mode: generate|chat, default: generate", {'m'},
+      "generate");
+  args::ValueFlag<std::string> systemPromptFlag(
+      parser, "string", "System prompt in chat mode (optional)", {'y'});
+  args::ValueFlag<float> repetitionPenaltyFlag(
+      parser, "float", "Repetition penalty, default 1.0", {'r'}, 1.0f);
+  args::Flag flashmemFlag(parser, "flashmem", "Enable flash memory",
+                          {"flashmem"});
+  args::Flag specDecodingFlag(parser, "specdecoding",
+                              "Enable speculative decoding", {"specdecoding"});
 
-  // Build additional config from cmdline
+  args::Positional<std::string> modelPath(parser, "checkpoint",
+                                          "Path to the model checkpoint");
+
+  try {
+    parser.ParseCLI(argc, argv);
+  } catch (args::Help &) {
+    std::cout << parser;
+    return 0;
+  } catch (args::ParseError &e) {
+    std::cerr << e.what() << std::endl;
+    std::cerr << parser;
+    return 1;
+  }
+
+  std::string model_path = args::get(modelPath);
+  float temperature = args::get(temperatureFlag);
+  float topp = args::get(toppFlag);
+  int steps = args::get(stepsFlag);
+  std::string prompt = args::get(promptFlag);
+  std::string tokenizer_path = args::get(tokenizerPathFlag);
+  std::string mode = args::get(modeFlag);
+  std::string system_prompt =
+      systemPromptFlag ? args::get(systemPromptFlag) : "";
+  bool flashmem = flashmemFlag;
+  bool specDecoding = specDecodingFlag;
   UserConfig userConfig;
-  userConfig.repetition_penalty = 1.0;
+  userConfig.repetition_penalty = args::get(repetitionPenaltyFlag);
 
-  // poor man's C argparse so we can override the defaults above from the
-  // command line
-  if (argc >= 2) {
-    model_path = argv[1];
-  } else {
-    error_usage();
-  }
-  for (int i = 2; i < argc; i += 2) {
-    // do some basic validation
-    if (i + 1 >= argc) {
-      error_usage();
-    } // must have arg after flag
-    if (argv[i][0] != '-') {
-      error_usage();
-    } // must start with dash
-    if (strlen(argv[i]) != 2) {
-      error_usage();
-    } // must be -x (one dash, one letter)
-    // read in the args
-    if (argv[i][1] == 't') {
-      temperature = atof(argv[i + 1]);
-    } else if (argv[i][1] == 'p') {
-      topp = atof(argv[i + 1]);
-    } else if (argv[i][1] == 'n') {
-      steps = atoi(argv[i + 1]);
-    } else if (argv[i][1] == 'i') {
-      prompt = argv[i + 1];
-    } else if (argv[i][1] == 'z') {
-      tokenizer_path = argv[i + 1];
-    } else if (argv[i][1] == 'm') {
-      mode = argv[i + 1];
-    } else if (argv[i][1] == 'y') {
-      system_prompt = argv[i + 1];
-    } else if (argv[i][1] == 'r') {
-      userConfig.repetition_penalty = atof(argv[i + 1]);
-    } else {
-      error_usage();
-    }
-  }
-
-  // parameter validation/overrides
-  if (temperature < 0.0)
-    temperature = 0.0;
-  if (topp < 0.0 || 1.0 < topp)
-    topp = 0.9;
+  // Validating parameters
+  if (temperature < 0.0f)
+    temperature = 0.0f;
+  if (topp < 0.0f || topp > 1.0f)
+    topp = 0.9f;
   if (steps < 0)
     steps = 0;
 
@@ -487,6 +484,11 @@ int main(int argc, char *argv[]) {
   }
 
   file.close();
+
+  if (flashmem)
+    fprintf(stderr, "Flash memory enabled\n");
+  if (specDecoding)
+    fprintf(stderr, "Speculative decoding enabled\n");
   // load the model using the model.bin file
   if (config->num_bits == 32) {
     Mamba<float> mamba;
@@ -517,7 +519,8 @@ int main(int argc, char *argv[]) {
     if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
     } else if (mode.compare("chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt.c_str(),
+           steps);
     } else {
       fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
@@ -556,7 +559,8 @@ int main(int argc, char *argv[]) {
     if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
     } else if (mode.compare("chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt.c_str(),
+           steps);
     } else {
       fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
@@ -594,7 +598,8 @@ int main(int argc, char *argv[]) {
     if (mode.compare("generate") == 0) {
       generate(&mamba, &tokenizer, &sampler, prompt, steps, userConfig);
     } else if (mode.compare("chat") == 0) {
-      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt, steps);
+      chat(&mamba, &tokenizer, &sampler, prompt.c_str(), system_prompt.c_str(),
+           steps);
     } else {
       fprintf(stderr, "unknown mode: %s\n", mode.c_str());
       error_usage();
