@@ -1,6 +1,7 @@
 /* Inference for Mamba model in pure C */
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -391,7 +392,8 @@ void error_usage() {
   std::cerr << "  -m <string> mode: generate|chat, default: generate\n";
   std::cerr << "  -y <string> (optional) system prompt in chat mode\n";
   std::cerr << "  --flashmem enable flash memory\n";
-  std::cerr << "  --specdecoding enable speculative decoding\n";
+  std::cerr
+      << "  --specdecoding enable speculative decoding with path to model\n";
   exit(EXIT_FAILURE);
 }
 
@@ -420,8 +422,9 @@ int main(int argc, char *argv[]) {
       parser, "float", "Repetition penalty, default 1.0", {'r'}, 1.0f);
   args::Flag flashmemFlag(parser, "flashmem", "Enable flash memory",
                           {"flashmem"});
-  args::Flag specDecodingFlag(parser, "specdecoding",
-                              "Enable speculative decoding", {"specdecoding"});
+  args::ValueFlag<std::string> specDecodingFlag(
+      parser, "specdecoding", "Path to the model for speculative decoding",
+      {"specdecoding"});
 
   args::Positional<std::string> modelPath(parser, "checkpoint",
                                           "Path to the model checkpoint");
@@ -447,7 +450,8 @@ int main(int argc, char *argv[]) {
   std::string system_prompt =
       systemPromptFlag ? args::get(systemPromptFlag) : "";
   bool flashmem = flashmemFlag;
-  bool specDecoding = specDecodingFlag;
+  std::string specDecodingModelPath =
+      specDecodingFlag ? args::get(specDecodingFlag) : "";
   UserConfig userConfig;
   userConfig.repetition_penalty = args::get(repetitionPenaltyFlag);
 
@@ -487,13 +491,15 @@ int main(int argc, char *argv[]) {
 
   if (flashmem)
     fprintf(stderr, "Flash memory enabled\n");
-  if (specDecoding)
+  if (specDecodingFlag)
     fprintf(stderr, "Speculative decoding enabled\n");
   // load the model using the model.bin file
   if (config->num_bits == 32) {
     Mamba<float> mamba;
+    Mamba<float> aux_mamba; // one for spec decoding
 
     load_model(&mamba, model_path);
+    load_model(&aux_mamba, specDecodingModelPath);
 
     // print the config
     fprintf(stderr,
@@ -532,6 +538,10 @@ int main(int argc, char *argv[]) {
     free_model(&mamba);
   } else if (config->num_bits == 16) {
     Mamba<int16_t> mamba;
+    Mamba<int16_t> aux_mamba; // one for spec decoding
+
+    load_model(&mamba, model_path);
+    load_model(&aux_mamba, specDecodingModelPath);
 
     load_model(&mamba, model_path);
 
@@ -572,7 +582,9 @@ int main(int argc, char *argv[]) {
     free_model(&mamba);
   } else if (config->num_bits == 8) {
     Mamba<int8_t> mamba;
+    Mamba<int8_t> aux_mamba; // one for spec decoding
     load_model(&mamba, model_path);
+    load_model(&aux_mamba, specDecodingModelPath);
 
     // print the config
     fprintf(stderr,
