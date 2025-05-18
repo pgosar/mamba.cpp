@@ -1,30 +1,32 @@
 To run:
 
-1. Create build directory
-2. vcpkg install
-3. python3 download_models.py
-4. ./build.sh
+1. python3 scripts/download_models.py -m 370m --bits 32 -md models/370m_32bit.bin
+2. make fast
+3. ./build/mamba models/model.bin -n 20 -i "Customer Support should" -t 0.0
 
 Command line arguments will be used to control inference, for example, quantization level,
 debugging verbosity, input prompt.
 
+You can use the download models shell script to download the useful configurations for testing, including tokenizers.
+
+## TODO
 Model configuration will be done through model_config.yaml, for example, temperature (text
 diversity), generated text amount, batch size. There may be multiple selectable configurations,
 these are selected through the command line arguments.
 
 ## TODO
-- [ ] Initial C++ Implementation
+- [x] Initial C++ Implementation
+    
+- [x] C++ Memory optimization
 
-- [ ] Quantization
-
-- [ ] 1-bit weight experimentation
+- [x] Quantization
   
 - [ ] Speculative Decoding
-    - [ ] draft model fine tuning for jamba
 
 - [ ] Flash mem
     - [x] neuron activation data
-    - [ ] hot and cold neurons prediction
+    - [x] hot and cold neurons prediction
+    - [ ] Actually load in partial model
           
 - [ ] Matrix mult optimization and overall optimization
 

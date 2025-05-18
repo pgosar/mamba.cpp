@@ -2,7 +2,7 @@ import argparse
 import torch
 from transformers import MambaForCausalLM, AutoTokenizer
 
-# Define model dimensions
+# Define models dimensions
 model_dimensions = {
     "130M": {"num_layers": 24, "dim": 768},
     "370M": {"num_layers": 48, "dim": 1024},
@@ -48,13 +48,13 @@ def main(model_size):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the model with specified size.")
+    parser = argparse.ArgumentParser(description="Run the models with specified size.")
     parser.add_argument(
         "-m",
-        "--model-size",
+        "--models-size",
         type=str,
         choices=model_dimensions.keys(),
-        help="Size of the model",
+        help="Size of the models",
         required=True,
     )
     args = parser.parse_args()
