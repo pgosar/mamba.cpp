@@ -1,0 +1,13 @@
+build/
+builddir/
+vcpkg_installed/
+.cache/
+venv/
+models/
+.vscode/
+vcpkg/
+.idea
+.Rhistory
+.DS_Store
+.vcpkg-root
+use_models.py

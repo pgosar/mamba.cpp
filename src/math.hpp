@@ -1,0 +1,342 @@
+#ifndef MATH_HPP
+#define MATH_HPP
+
+#include "tensor.hpp"
+#include <cmath>
+#include <algorithm>
+
+// ----------------------------------------------------------------------------
+// neural net blocks; the dynamics of the models
+
+template <typename T> inline void rmsnorm(
+  EnhancedTensor<T>& o, 
+  const Tensor<T>& x, 
+  const Tensor<T>& weight, 
+  float *tempbuf,
+  int size
+  ) {
+  // calculate sum of squares
+  float ss = 0.0f;
+  for (int j = 0; j < size; j++) {
+    float xj = x[j];
+    ss += xj * xj;
+  }
+  ss /= size;
+  ss += 1e-5f;
+  ss = 1.0f / sqrtf(ss);
+
+  // normalize and scale
+  for (size_t j = 0; j < size; j++) {
+    tempbuf[j] = x[j] * weight[j] * ss; //Todo new macro to dequantize
+  }
+
+  o.requantize(tempbuf);
+}
+
+template <typename T> inline void softmax(EnhancedTensor<T>& x, T* tempbuf, int size) {
+  // find max value (for numerical stability)
+  float max_val = x[0];
+  for (int i = 1; i < size; i++) {
+    max_val = std::max(max_val, x[i]);
+  }
+  
+  // exp and sum
+  float sum = 0.0f;
+  for (int i = 0; i < size; i++) {
+    tempbuf[i] = expf(x[i] - max_val);
+    sum += tempbuf[i];
+  }
+
+  // normalize
+  for (int i = 0; i < size; i++) {
+    tempbuf[i] /= sum;
+  }
+
+  x.requantize(tempbuf);
+}
+
+inline void softmax(float* x, int size) {
+  // find max value (for numerical stability)
+  float max_val = x[0];
+  for (int i = 1; i < size; i++) {
+    max_val = std::max(max_val, x[i]);
+  }
+
+  // exp and sum
+  float sum = 0.0f;
+  for (int i = 0; i < size; i++) {
+    x[i] = expf(x[i] - max_val);
+    sum += x[i];
+  }
+
+  // normalize
+  for (int i = 0; i < size; i++) {
+    x[i] /= sum;
+  }
+}
+
+
+inline float softplus(float x) { return logf(1.0f + expf(x)); }
+
+inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+
+inline float silu(float x) { return x * sigmoid(x); }
+
+template <typename T>
+inline void silu(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = silu(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void silu_and_multiply(EnhancedTensor<T>& tensor, EnhancedTensor<T>& silu_tensor,
+                              float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = tensor[i] * silu(silu_tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void softplus(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = softplus(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void expf(EnhancedTensor<T>& tensor, float* tempbuf) {
+  for(int i = 0; i < tensor.len(); i++) {
+    tempbuf[i] = expf(tensor[i]);
+  }
+
+  tensor.requantize(tempbuf);
+}
+
+template <typename T>
+inline void shift_matrix_left(EnhancedTensor2D<T>& matrix, int rows, int cols) {
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols - 1; j++) {
+      matrix.set(i * cols + j, matrix.get(i * cols + j + 1));
+    }
+  }
+}
+
+template <typename T>
+inline void update_last_column(EnhancedTensor2D<T>& matrix, const Tensor<T>& x, int rows, int cols) {
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    matrix.set(i * cols + cols - 1, x.get(i));
+  }
+}
+
+template <typename T>
+inline void shift_left_and_update_last(
+  EnhancedTensor<T>& matrix, 
+  const Tensor<T>& x, 
+  float* tempbuf, int rows, int cols) {
+  matrix.dequantize(tempbuf);
+
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols - 1; j++) {
+      tempbuf[i * cols + j] = tempbuf[i * cols + j + 1];
+    }
+    tempbuf[i * cols + cols - 1] = x[i];
+  }
+
+  matrix.requantize(tempbuf);
+}
+
+template <typename T>
+inline void rowwise_dot_product(
+  EnhancedTensor<T>& out, 
+  const Tensor<T>& matrix,
+  const Tensor<T>& weights, 
+  float* tempbuf,
+  int rows,
+  int cols) {
+// matrix[rows,cols], weights[cols] -> out[rows]
+// this is a dot product of each row of the matrix with the weights
+// i.e. out[i] = matrix[i,:] @ weights
+
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    float val = 0.0f;
+    for (int j = 0; j < cols; j++) {
+      val += matrix[i * cols + j] * weights[j];
+    }
+    tempbuf[i] = val;
+  }
+
+  out.requantize(tempbuf);
+}
+
+//TODO optimize
+template <typename T> inline void matmul(
+  EnhancedTensor<T>& xout, 
+  const Tensor<T>& x, 
+  const Tensor<T>& w, 
+  float *tempbuf,
+  int d, 
+  int n) {
+// w[d,n] @ x[n] -> xout[d]
+
+#pragma omp parallel for
+  for (int i = 0; i < d; i++) {
+    float val = 0.0f;
+    for (int j = 0; j < n; j++) {
+      val += w[i * n + j] * x[j];
+    }
+    tempbuf[i] = val;
+  }
+
+  xout.requantize(tempbuf);
+}
+
+template <typename T>
+inline void linear(EnhancedTensor<T>& xout, 
+                   const Tensor<T>& x, 
+                   const Tensor<T>& w, 
+                   const Tensor<T>& b, 
+                   float* tempbuf, int d, int n) {
+// w[d,n] @ x[n] + b[d] -> xout[d]
+
+#pragma omp parallel for
+  for (int i = 0; i < d; i++) {
+    float val = 0.0f;
+    for (int j = 0; j < n; j++) {
+      val += w[i * n + j] * x[j];
+    }
+    tempbuf[i] = val + b[i];
+  }
+
+  xout.requantize(tempbuf);
+}
+
+template <typename T>
+inline void broadcast_multiply(
+  EnhancedTensor<T>& out, 
+  const Tensor<T>& x, const Tensor<T>& y, 
+  float* tempbuf, int d, int n) {
+// x[d], y[d,n] -> out[d,n]
+
+#pragma omp parallel for
+  for (int i = 0; i < d; i++) {
+    for (int j = 0; j < n; j++) {
+      int index = i * n + j;
+      tempbuf[index] = x[i] * y[index];
+      // out[i * n + j] = x[i] * y[i * n + j];
+    }
+  }
+
+  out.requantize(tempbuf);
+}
+
+template <typename T>
+inline void elementwise_multiply(EnhancedTensor<T>& result, 
+                                 const Tensor<T>& matrix1,
+                                 const Tensor<T>& matrix2,
+                                 float* tempbuf,
+                                 int total_elements) {
+
+#pragma omp parallel for
+  for (int i = 0; i < total_elements; i++) {
+    tempbuf[i] = matrix1[i] * matrix2[i];
+  }
+
+  result.requantize(tempbuf);
+}
+
+template <typename T>
+inline void elementwise_add(
+  EnhancedTensor<T>& result, 
+  const Tensor<T>& matrix1,
+  const Tensor<T>& matrix2,
+  float* tempbuf, int total_elements) {
+
+#pragma omp parallel for
+  for (int i = 0; i < total_elements; i++) {
+    tempbuf[i] = matrix1[i] + matrix2[i];
+  }
+
+  result.requantize(tempbuf);
+}
+
+template <typename T>
+inline void elementwise_multiply_and_add(
+  EnhancedTensor<T>& result, 
+  const Tensor2D<T>& matrix1, 
+  const Tensor2D<T>& matrix2,
+  const Tensor2D<T>& matrix3, 
+  float* tempbuf, int total_elements) {
+
+#pragma omp parallel for
+  for (int i = 0; i < total_elements; i++) {
+    tempbuf[i] = matrix1[i] * matrix2[i] + matrix3[i];
+  }
+
+  result.requantize(tempbuf);
+}
+
+template <typename T>
+inline void elementwise_multiply_and_add(
+  EnhancedTensor<T>& result,
+  const Tensor<T>& matrix1,
+  const Tensor<T>& matrix2,
+  const Tensor<T>& matrix3,
+  float* const tempbuf, int total_elements) {
+
+
+#pragma omp parallel for
+  for (int i = 0; i < total_elements; i++) {
+    tempbuf[i] = matrix1[i] * matrix2[i] + matrix3[i];
+  }
+
+  result.requantize(tempbuf);
+}
+
+template <typename T>
+inline void outer_product(
+  EnhancedTensor<T>& out, 
+  const Tensor<T>& x, 
+  const Tensor<T>& y, 
+  float* tempbuf, int d, int n) {
+
+// x[d], y[n] -> out[d,n]
+#pragma omp parallel for
+  for (int i = 0; i < d; i++) {
+    for (int j = 0; j < n; j++) {
+      tempbuf[i * n + j] = x[i] * y[j];
+    }
+  }
+
+  out.requantize(tempbuf);
+}
+
+template <typename T>
+inline void sum_along_last_dim(
+  EnhancedTensor<T>& result, 
+  const Tensor<T>& matrix, 
+  float* tempbuf, int rows, int cols) {
+
+#pragma omp parallel for
+  for (int i = 0; i < rows; i++) {
+    float val = 0.0f;
+    for (int j = 0; j < cols; j++) {
+      val += matrix[i * cols + j];
+    }
+    tempbuf[i] = val;
+  }
+
+  result.requantize(tempbuf);
+}
+
+#endif // MATH_HPP
